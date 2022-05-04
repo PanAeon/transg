@@ -6,7 +6,7 @@ glib::wrapper! {
 }
 
 impl TorrentInfo {
-    pub fn new(id: i64, name: String, status: i64, percent_complete: f32, rate_upload: i64, total_size: i64, download_dir: String, added_date: i64) -> Self {
+    pub fn new(id: i64, name: String, status: i64, percent_complete: f64, rate_upload: i64, total_size: i64, download_dir: String, added_date: i64) -> Self {
         Object::new(&[
             ("id", &id),
             ("name", &name),
@@ -22,7 +22,7 @@ impl TorrentInfo {
 
 mod imp {
 
-    use glib::{ParamFlags, ParamSpec, ParamSpecInt, ParamSpecString, ParamSpecFloat, ParamSpecInt64, Value};
+    use glib::{ParamFlags, ParamSpec, ParamSpecString, ParamSpecDouble, ParamSpecInt64, Value};
     use gtk::glib;
     use gtk::prelude::*;
     use gtk::subclass::prelude::*;
@@ -35,7 +35,7 @@ mod imp {
         id: Cell<i64>,
         name: RefCell<String>,
         status: Cell<i64>,
-        percent_complete: Cell<f32>,
+        percent_complete: Cell<f64>,
         rate_upload: Cell<i64>,
         total_size: Cell<i64>,
         download_dir: RefCell<String>,
@@ -57,7 +57,7 @@ mod imp {
                     ParamSpecInt64::new( "id", "id", "id", i64::MIN, i64::MAX, 0, ParamFlags::READWRITE),
                     ParamSpecString::new( "name", "name", "name", None, ParamFlags::READWRITE),
                     ParamSpecInt64::new( "status", "status", "status", i64::MIN, i64::MAX, 0, ParamFlags::READWRITE),
-                    ParamSpecFloat::new( "percent-complete", "percent-complete", "percent-complete", f32::MIN, f32::MAX, 0.0, ParamFlags::READWRITE),
+                    ParamSpecDouble::new( "percent-complete", "percent-complete", "percent-complete", f64::MIN, f64::MAX, 0.0, ParamFlags::READWRITE),
                     ParamSpecInt64::new( "rate-upload", "rate-upload", "rate-upload", i64::MIN, i64::MAX, 0, ParamFlags::READWRITE),
                     ParamSpecInt64::new( "total-size", "total-size", "total-size", i64::MIN, i64::MAX, 0, ParamFlags::READWRITE),
                     ParamSpecString::new( "download-dir", "download-dir", "download-dir", None, ParamFlags::READWRITE),
