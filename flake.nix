@@ -21,9 +21,10 @@
               cargo-generate
               wayland
               gtk4
+              material-icons
+              openssl
             ];
-             PKG_CONFIG_PATH = "${pkgs.libxml2.dev}/lib/pkgconfig";
-#            PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig:${pkgs.libxml2.dev}/lib/pkgconfig";
+            PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig:${pkgs.libxml2.dev}/lib/pkgconfig";
             shellHook = "exec fish";
           };
       });

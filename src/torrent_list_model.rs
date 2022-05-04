@@ -6,14 +6,16 @@ glib::wrapper! {
 }
 
 impl TorrentInfo {
-    pub fn new(id: i64, name: String, status: i64, percent_complete: f32, rate_upload: i64, total_size: i64) -> Self {
+    pub fn new(id: i64, name: String, status: i64, percent_complete: f32, rate_upload: i64, total_size: i64, download_dir: String, added_date: i64) -> Self {
         Object::new(&[
             ("id", &id),
             ("name", &name),
             ("status", &status),
             ("percent-complete", &percent_complete),
             ("rate-upload", &rate_upload),
-            ("total-size", &total_size)
+            ("total-size", &total_size),
+            ("download-dir", &download_dir),
+            ("added-date", &added_date),
         ]).expect("Failed to create 'TorrentInfo'")
     }
 }
@@ -35,7 +37,9 @@ mod imp {
         status: Cell<i64>,
         percent_complete: Cell<f32>,
         rate_upload: Cell<i64>,
-        total_size: Cell<i64>
+        total_size: Cell<i64>,
+        download_dir: RefCell<String>,
+        added_date: Cell<i64>,
     }
 
     // The central trait for subclassing a GObject
@@ -56,6 +60,8 @@ mod imp {
                     ParamSpecFloat::new( "percent-complete", "percent-complete", "percent-complete", f32::MIN, f32::MAX, 0.0, ParamFlags::READWRITE),
                     ParamSpecInt64::new( "rate-upload", "rate-upload", "rate-upload", i64::MIN, i64::MAX, 0, ParamFlags::READWRITE),
                     ParamSpecInt64::new( "total-size", "total-size", "total-size", i64::MIN, i64::MAX, 0, ParamFlags::READWRITE),
+                    ParamSpecString::new( "download-dir", "download-dir", "download-dir", None, ParamFlags::READWRITE),
+                    ParamSpecInt64::new( "added-date", "added-date", "added-date", i64::MIN, i64::MAX, 0, ParamFlags::READWRITE),
                 ]
             });
             PROPERTIES.as_ref()
@@ -69,6 +75,8 @@ mod imp {
                 "percent-complete" => { self.percent_complete.replace(value.get().expect("The value needs to be of type `i32`.")); },
                 "rate-upload" => { self.rate_upload.replace(value.get().expect("The value needs to be of type `i32`.")); },
                 "total-size" => { self.total_size.replace(value.get().expect("The value needs to be of type `i32`.")); },
+                "download-dir" => { self.download_dir.replace(value.get().expect("The value needs to be of type `i32`.")); },
+                "added-date" => { self.added_date.replace(value.get().expect("The value needs to be of type `i32`.")); },
                 _ => unimplemented!(),
             }
         }
@@ -81,6 +89,8 @@ mod imp {
                 "percent-complete" => self.percent_complete.get().to_value(),
                 "rate-upload" => self.rate_upload.get().to_value(),
                 "total-size" => self.total_size.get().to_value(),
+                "download-dir" => self.download_dir.borrow().to_value(),
+                "added-date" => self.added_date.get().to_value(),
                 _ => unimplemented!(),
             }
         }

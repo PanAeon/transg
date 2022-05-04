@@ -1,11 +1,12 @@
+mod torrent_list_model;
+mod transmission_client;
 use gtk::prelude::*;
 use gtk::{ApplicationWindow, Application};
 use glib::clone;
 use gtk::glib;
 use gtk::gio;
-mod torrent_list_model;
 use torrent_list_model::TorrentInfo;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::rc::Rc;
 use std::cell::RefCell;
 
@@ -75,28 +76,33 @@ fn build_ui(app: &Application) {
         .css_classes(vec!["large-title".to_string()])
         .build();
     
-//    let vector: Vec<TorrentInfo> =
- //      (0..=3).into_iter().map(|x| { TorrentInfo::new(x, format!("Torrent #{}", &x), 0, 0.0, 0, 0) }).collect();
-//    model.splice(0, 0, &vector);
    
+    let visible_torrents_mutex : Arc<Mutex<Vec<i64>>> = Arc::new(Mutex::new(Vec::new()));
+    let visible_torrents_mutex_rm = visible_torrents_mutex.clone();
+    let visible_torrents_mutex_read = visible_torrents_mutex.clone();
     //        fucking transmission get torrents 
     {
         use transmission_rpc::types::{BasicAuth, RpcResponse};
-        use transmission_rpc::types::{Torrent, TorrentGetField, Torrents};
+        use transmission_rpc::types::{Torrent, TorrentGetField, Torrents, Id, IdOrRecent};
         use transmission_rpc::TransClient;
         use std::thread;
+
+        
+        enum TorrentUpdate {
+          Full(Vec<Torrent>),
+          Partial(Vec<Torrent>)
+        }
 
         
 
         use glib::{MainContext, PRIORITY_DEFAULT};
 
         let (tx, rx) = MainContext::channel(PRIORITY_DEFAULT); 
+        //let main_context = MainContext::default();
 
-        rx.attach(None, clone!(@weak model => @default-return Continue(false), move |xs:Vec<Torrent>|{
-
-              let n = model.n_items();
-              if n == 0 {
-                  println!(">>new");
+        rx.attach(None, clone!(@weak model => @default-return Continue(false), move |update:TorrentUpdate|{
+          match update {
+            TorrentUpdate::Full(xs) => {
               let torrents: Vec<TorrentInfo> = xs
               .iter()
               .map(|it| TorrentInfo::new(
@@ -105,24 +111,33 @@ fn build_ui(app: &Application) {
                   it.status.unwrap_or_default(),
                   it.percent_done.unwrap_or_default(),
                   it.rate_upload.unwrap_or_default(),
-                  it.total_size.unwrap_or_default())
+                  it.total_size.unwrap_or_default(),
+                  it.download_dir.as_ref().unwrap().to_string(),
+                  it.added_date.unwrap_or_default())
                 ).collect();
-                model.splice(0, 0, &torrents);
-              } else {
-                  println!(">>update received");
-                  let mut i = 0;
+              model.splice(0, 0, &torrents);
+              },
+           TorrentUpdate::Partial(xs) => {
+                  println!(">>update received "); // FIXME: somehow merge this two fucking lists..
+                  for x in xs {
+                      let mut i = 0;
+                      while let Some(y) = model.item(i) {
+                        if x.id.unwrap_or(-1) == y.property_value("id").get::<i64>().expect("skdfj") {
+                     //     println!("updating id: {}", x.id.unwrap_or(-1));
+                          y.set_property("rate-upload", x.rate_upload.unwrap_or_default().to_value());
+                          break;
+                        }
+                        i+=1;
+                      }
+                  } 
 
-                  while i < n {
-                    let model_item = model.item(i).unwrap();
-                    let j : usize = i.try_into().unwrap(); 
-                    model_item.set_property::<glib::Value>("rate-upload", xs.get(j).unwrap().rate_upload.unwrap_or_default().to_value());
-                    //model_item.set_property::<glib::Value>("rate-upload", torrents.get(j).unwrap().property("rate-upload"));
-                    i+=1;
-                  }
                   // how to update those bloody items?
+                  }
               }
+          }
+
            Continue(true)
-        }));
+        ));
 
         let client = TransClient::with_auth(&"http://192.168.1.217:9091/transmission/rpc".to_string(), 
                                             BasicAuth {user: "transmission".to_string(), password: "transmission".to_string()});
@@ -132,16 +147,26 @@ fn build_ui(app: &Application) {
           let rt = Runtime::new().expect("create tokio runtime");
           rt.block_on(async {
 
-              tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-              loop {
-              let res: RpcResponse<Torrents<Torrent>> = client.torrent_get(
-                  Some(vec![TorrentGetField::Id, TorrentGetField::Name, TorrentGetField::Status,
+                let fields = Some(vec![TorrentGetField::Id, TorrentGetField::Name, TorrentGetField::Status,
                             TorrentGetField::Percentdone, TorrentGetField::Rateupload, 
-                            TorrentGetField::Totalsize]), None).await.expect("Call Failed!");
-              let foo = res.arguments.torrents;
-              println!("Num torrents: {}", foo.len());
-              tx.send(foo).expect("blah");
-              tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                            TorrentGetField::Totalsize, TorrentGetField::Downloaddir,
+                            TorrentGetField::Addeddate]);
+                let foo = client.torrent_get(fields, None).await.expect("Call Failed!").arguments.torrents;
+                tx.send(TorrentUpdate::Full(foo)).expect("blah");
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+              loop {
+                let xs = visible_torrents_mutex_read.lock().unwrap();//.push(id);
+                let xss: Vec<Id> = xs.iter().take(10).map(|x| Id::Id(*x)).collect();                                                                     
+                drop(xs);
+                let fields = Some(vec![TorrentGetField::Id, TorrentGetField::Name, TorrentGetField::Status,
+                            TorrentGetField::Percentdone, TorrentGetField::Rateupload, 
+                            TorrentGetField::Totalsize, TorrentGetField::Downloaddir,
+                            TorrentGetField::Addeddate]);
+                let foo = client.torrent_get(fields, Some(IdOrRecent::RecentlyActive("recently-active".to_string()))).await.expect("Call Failed!").arguments.torrents;
+                println!("Received {} torrents", foo.len());
+                tx.send(TorrentUpdate::Partial(foo)).expect("blah");
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
               }
           })
         });
@@ -159,12 +184,8 @@ fn build_ui(app: &Application) {
     //let model = gio::ListStore::new(gtk::Label::static_type());
     
     let id_factory = gtk::SignalListItemFactory::new();
-    id_factory.connect_setup(move |_, list_item| {
-      let label = gtk::Label::new(None);
-      list_item.set_child(Some(&label));
-    });
 
-    id_factory.connect_bind(move |_, list_item| {
+    id_factory.connect_setup(move |_, list_item| {
         let label = gtk::Label::new(None);
         list_item.set_child(Some(&label));
 
@@ -172,6 +193,23 @@ fn build_ui(app: &Application) {
             .property_expression("item")
             .chain_property::<TorrentInfo>("id")
             .bind(&label, "label", gtk::Widget::NONE);
+    });
+
+    id_factory.connect_bind(move |_, _list_item| {
+        let id = _list_item.property::<TorrentInfo>("item").property_value("id").get::<i64>().expect("skdfj");
+        let mut xs = visible_torrents_mutex.lock().unwrap();//.push(id);
+        xs.push(id);
+    });
+
+
+    id_factory.connect_unbind(move |_, _list_item| {
+        let id = _list_item.property::<TorrentInfo>("item").property_value("id").get::<i64>().expect("skdfj");
+        let mut xs = visible_torrents_mutex_rm.lock().unwrap();  
+        let pos = xs.iter().position(|&x| x == id);
+        match pos {
+          Some(idx) => { xs.swap_remove(idx); },
+          _ => ()
+        }
     });
 
     let name_factory = gtk::SignalListItemFactory::new();
@@ -185,7 +223,15 @@ fn build_ui(app: &Application) {
             .chain_property::<TorrentInfo>("name")
             .bind(&label, "label", gtk::Widget::NONE);
     });
-
+/*
+ * 0 	Torrent is stopped
+1 	Torrent is queued to verify local data
+2 	Torrent is verifying local data
+3 	Torrent is queued to download
+4 	Torrent is downloading
+5 	Torrent is queued to seed
+6 	Torrent is seeding
+ */
     let status_factory = gtk::SignalListItemFactory::new();
     status_factory.connect_setup(move |_, list_item| {
         let label = gtk::Label::new(None);
@@ -201,14 +247,15 @@ fn build_ui(app: &Application) {
 
     let completion_factory = gtk::SignalListItemFactory::new();
     completion_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
+        let progress = gtk::ProgressBar::new();
+        list_item.set_child(Some(&progress));
 
-        // Bind `list_item->item->number` to `label->label`
         list_item
             .property_expression("item")
             .chain_property::<TorrentInfo>("percent-complete")
-            .bind(&label, "label", gtk::Widget::NONE);
+            .bind(&progress, "fraction", gtk::Widget::NONE);
+        
+        progress.set_show_text(true);
     });
 
 
@@ -237,12 +284,49 @@ fn build_ui(app: &Application) {
             .bind(&label, "label", gtk::Widget::NONE);
     });
 
+    let download_dir_factory = gtk::SignalListItemFactory::new();
+    download_dir_factory.connect_setup(move |_, list_item| {
+        let label = gtk::Label::new(None);
+        list_item.set_child(Some(&label));
+
+        // Bind `list_item->item->number` to `label->label`
+        list_item
+            .property_expression("item")
+            .chain_property::<TorrentInfo>("download-dir")
+            .bind(&label, "label", gtk::Widget::NONE);
+    });
+
+
+    let added_date_factory = gtk::SignalListItemFactory::new();
+    added_date_factory.connect_setup(move |_, list_item| {
+        let label = gtk::Label::new(None);
+        list_item.set_child(Some(&label));
+
+        // Bind `list_item->item->number` to `label->label`
+        list_item
+            .property_expression("item")
+            .chain_property::<TorrentInfo>("added-date")
+            .bind(&label, "label", gtk::Widget::NONE);
+    });
     
-    let filter = gtk::FilterListModel::new(Some(&model), Some(&gtk::CustomFilter::new(|x|{ x.property_value("rate-upload").get::<i64>().expect("foo") > 0 })));
+    let _filter = gtk::FilterListModel::new(Some(&model), Some(&gtk::CustomFilter::new(|x|{ x.property_value("rate-upload").get::<i64>().expect("foo") > 0 })));
+    let _sorter = gtk::SortListModel::new(Some(&model), Some(&gtk::CustomSorter::new(|x,y|{
+        if x.property_value("added-date").get::<i64>().expect("ad") > y.property_value("added-date").get::<i64>().expect("ad") {
+            gtk::Ordering::Smaller
+        } else if x.property_value("added-date").get::<i64>().expect("ad") < y.property_value("added-date").get::<i64>().expect("ad") {
+            gtk::Ordering::Larger
+        } else {
+            gtk::Ordering::Equal
+        }
+    })));
 
-    let torrent_selection_model = gtk::MultiSelection::new(Some(&filter));
+    
+
+    
+
+    let torrent_selection_model = gtk::MultiSelection::new(Some(&_sorter));
     let torrent_list = gtk::ColumnView::new(Some(&torrent_selection_model));
-
+    
 
     let c1 = gtk::ColumnViewColumn::new(Some("id"), Some(&id_factory));
     let c2 = gtk::ColumnViewColumn::new(Some("name"), Some(&name_factory));
@@ -250,20 +334,26 @@ fn build_ui(app: &Application) {
     let c4 = gtk::ColumnViewColumn::new(Some("completion"), Some(&completion_factory));
     let c5 = gtk::ColumnViewColumn::new(Some("upload speed"), Some(&upload_speed_factory));
     let c6 = gtk::ColumnViewColumn::new(Some("total size"), Some(&total_size_factory));
+    let c7 = gtk::ColumnViewColumn::new(Some("download dir"), Some(&download_dir_factory));
+    let c8 = gtk::ColumnViewColumn::new(Some("date added"), Some(&added_date_factory));
     c1.set_resizable(true);
     c2.set_resizable(true);
     c3.set_resizable(true);
     c4.set_resizable(true);
     c5.set_resizable(true);
     c6.set_expand(true);
+    c7.set_resizable(true);
+    c8.set_resizable(true);
     torrent_list.append_column(&c1);
     torrent_list.append_column(&c2);
     torrent_list.append_column(&c3);
     torrent_list.append_column(&c4);
     torrent_list.append_column(&c5);
     torrent_list.append_column(&c6);
+    torrent_list.append_column(&c7);
+    torrent_list.append_column(&c8);
 
-    torrent_list.set_reorderable(false);
+    torrent_list.set_reorderable(true);
     torrent_list.set_show_row_separators(true);
     torrent_list.set_show_column_separators(true);
 
