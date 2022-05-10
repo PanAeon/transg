@@ -9,11 +9,11 @@ glib::wrapper! {
 impl PeerObject {
     pub fn new(
       address: &String,
-client_name: &String,
-progress: &f64,
-rate_to_client: &u64,
-rate_to_peer: &u64,
-flag_str: &String,
+      client_name: &String,
+      progress: &f64,
+      rate_to_client: &u64,
+      rate_to_peer: &u64,
+      flag_str: &String,
     ) -> Self {
         Object::new(&[
           ("address", &address),

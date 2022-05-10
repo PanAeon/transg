@@ -1,1 +1,1 @@
-pub mod transmission_client;
+pub mod transmission;
