@@ -1,19 +1,19 @@
 //use std::fmt;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Node {
     pub data: String,
     pub path: String,
     pub children: Vec<Node>
 }
 
-fn group(xs: Vec<Vec<&str>>) -> Vec<(&str, Vec<Vec<&str>>)> {
+fn group(xs: Vec<Vec<String>>) -> Vec<(String, Vec<Vec<String>>)> {
     if xs.len() == 0 {
         return vec![];
     }
-    let mut curr = "";
-    let mut ys: Vec<Vec<&str>> = vec![];
-    let mut res: Vec<(&str, Vec<Vec<&str>>)> = vec![];
+    let mut curr = String::from("");
+    let mut ys: Vec<Vec<String>> = vec![];
+    let mut res: Vec<(String, Vec<Vec<String>>)> = vec![];
 
     for mut x in xs {
         let head = x.remove(0);
@@ -34,8 +34,8 @@ fn group(xs: Vec<Vec<&str>>) -> Vec<(&str, Vec<Vec<&str>>)> {
     res
 }
 
-pub fn build_tree(parent_path: &str, mut xs: Vec<Vec<&str>>) -> Vec<Node> {
-    xs.sort_by(|a, b| a[0].partial_cmp(b[0]).unwrap());
+pub fn build_tree(parent_path: &String, mut xs: Vec<Vec<String>>) -> Vec<Node> {
+    xs.sort_by(|a, b| a[0].partial_cmp(&b[0]).unwrap());
     let xxs = group(xs);
     let mut ns: Vec<Node> = vec![];
     for (parent, ys) in xxs {
@@ -45,9 +45,3 @@ pub fn build_tree(parent_path: &str, mut xs: Vec<Vec<&str>>) -> Vec<Node> {
     ns
 }
 
-fn main() {
-    println!("Hello, world!{:?}", "bar".split("/").collect::<Vec<&str>>());
-    let xs = vec!["foo/a", "foo/b", "foo/c", "foo/a/1", "foo/a/2", "foo/a/3", "bar"];
-    let ys : Vec<Vec<&str>> = xs.iter().map(|s| s.split("/").collect()).collect();
-    println!("{:#?}", build_tree("", ys));
-}

@@ -16,6 +16,7 @@
             buildInputs = [
               rust-bin.nightly.latest.default
               rustfmt
+              clippy
               rust-analyzer
               pkg-config
               cargo-generate

@@ -122,7 +122,7 @@ const ALL: i64 = -1;
 const SEPARATOR: i64 = -2;
 
 const NONE_EXPRESSION: Option<&gtk::Expression> = None;
-const NO_SHOW: u64 = u64::MAX;
+//const NO_SHOW: u64 = u64::MAX;
 
 fn json_value_to_torrent_info(json: &serde_json::Value) -> TorrentInfo {
     let xs = json.as_array().unwrap(); 
@@ -160,7 +160,6 @@ fn update_torrent_stats(model: &ListStore, category_model: &ListStore) {
                  while let Some(x) = model.item(i) {
                    let status = x.property_value("status").get::<i64>().expect("skdfj");
                    let folder = x.property_value("download-dir").get::<String>().expect("skdfj1");
-//                   let folder = process_folder(folder);
                    *group_stats.folders.entry(folder).or_insert(1) += 1;
                    group_stats.num_total += 1;
                    match status {
@@ -503,8 +502,9 @@ fn build_ui(app: &Application) {
 
               loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                let opt = selected_torrent_mutex_read.lock().unwrap();//.push(id);
-                if let Some(id) = *opt {
+                let opt = *selected_torrent_mutex_read.lock().unwrap();//.push(id);
+                
+                if let Some(id) = opt {
                     println!("{}", id);
                   let details = client.get_torrent_details(vec![id]).await.expect("oops3"); // FIXME: what if id is wrong?
                   if details.arguments.torrents.len() > 0 {
@@ -514,7 +514,7 @@ fn build_ui(app: &Application) {
                       }
                   }                                                                                            
                 }
-                drop(opt);
+                //drop(opt);
 
                 let foo = client.get_recent_torrents(&TORRENT_INFO_FIELDS).await.expect("oops2");
                 let torrents = foo.get("arguments").unwrap().get("torrents").unwrap().to_owned(); 
@@ -792,14 +792,7 @@ torrent_selection_model.connect_selection_changed(move |_model, _pos, _num_items
       }
       i += 1;
     } 
-//  println!("{} {} {}", x, y, z);
 });
-  //  torrent_selection_model.connect_selected_item_notify(move |s| {
-  //    match s.selected_item() {
-  //        Some(item) => {},
-  //        None       => {}
-  //    }
-  //  });
 
 
     let torrent_list = gtk::ColumnView::new(Some(&torrent_selection_model));
@@ -1632,24 +1625,24 @@ fn build_file_objects_rec(tree: &Vec<utils::Node>, files: &HashMap<String, &tran
   }
 } 
 
-fn get_children(tree: Vec<utils::Node>, mut path: Vec<&str>) -> Vec<utils::Node> {
+fn get_children(tree: &Vec<utils::Node>, mut path: Vec<&str>) -> Vec<utils::Node> {
   for n in tree {
     if n.data == path[0] {
         if path.len() == 1 {
-            return n.children;
+            return n.children.clone();
         } else {
             path.remove(0);
-            return get_children(n.children, path);
+            return get_children(&n.children, path);
         }
     }
   }
   vec![]
 }
 
+// FIXME: memory leak
 fn create_file_model(files: Vec<transmission::File>) ->  gtk::TreeListModel {
-//    let files = [transmission::File { name: "Populous The Beginning [GOG]/setup_populous_the_beginning_1.0.0.33.exe".to_string(), length: 329689647, bytes_completed: 329689647 }, transmission::File { name: "Populous The Beginning [GOG]/Bonus Content.rar".to_string(), length: 2576303, bytes_completed: 2576303 }, transmission::File { name: "Populous The Beginning [GOG]/Hardware Mode Fix.zip".to_string(), length: 1514303, bytes_completed: 1514303 }];
-    let xs : Vec<Vec<&str>> = files.iter().map(|f| f.name.split("/").collect()).collect();
-    let tree = utils::build_tree("", xs);
+    let xs : Vec<Vec<String>> = files.iter().map(|f| f.name.split('/').map(|x| String::from(x)).collect()).collect();
+    let tree = utils::build_tree(&String::from(""), xs);
     let mut files_by_name = HashMap::new();
     for f in &files {
         files_by_name.insert(f.name.clone(), f);
@@ -1667,28 +1660,21 @@ fn create_file_model(files: Vec<transmission::File>) ->  gtk::TreeListModel {
     let fun =  move |x:&glib::Object|{
       let path = x.property_value("path").get::<String>().unwrap();
       let p : Vec<&str> = path.split("/").collect();
-      let xs : Vec<Vec<&str>> = files.iter().map(|f| f.name.split("/").collect()).collect();
-      let tree = utils::build_tree("", xs);
-      let children = get_children(tree, p);
+      let children = get_children(&tree, p);
       if children.len() > 0 {
-
-    let m0 = gio::ListStore::new(FileObject::static_type());
-    
-    let mut v0 : Vec<FileObject> = vec![];
-    for node in &children { 
-//        println!("{:?}", file_objects_by_name);
-        v0.push(file_objects_by_name.get(&node.path).unwrap().to_owned());
-    }
-    m0.splice(0, 0, &v0);
-//    let model = gtk::TreeListModel::new(&m0, false, true,fun);
+        let m0 = gio::ListStore::new(FileObject::static_type());
+        let mut v0 : Vec<FileObject> = vec![];
+        for node in &children { 
+          v0.push(file_objects_by_name.get(&node.path).unwrap().to_owned());
+        }
+        m0.splice(0, 0, &v0);
         Some(m0.upcast())
       } else {
           None
       }
     };
-  
 
-    let model = gtk::TreeListModel::new(&m0, false, true,fun);
+    let model = gtk::TreeListModel::new(&m0, false, true, fun);
     model
 }
 
