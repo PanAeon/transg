@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+
+  <gresource prefix="/org/transgression/">
+    <file compressed="true" preprocess="xml-stripblanks">torrent_detail.ui</file>
+  </gresource>
+</gresources>
+

@@ -1,7 +1,7 @@
 use glib::Object;
 use gtk::glib;
-use gtk::prelude::*;
-use gtk::subclass::prelude::*;
+//use gtk::prelude::*;
+//use gtk::subclass::prelude::*;
 
 glib::wrapper! {
     pub struct TorrentDetailsObject(ObjectSubclass<imp::TorrentDetailsObject>);
@@ -75,11 +75,16 @@ impl TorrentDetailsObject {
         .expect("Failed to create 'TorrentDetailsObject'")
     }
 }
+impl Default for TorrentDetailsObject {
+    fn default() -> Self {
+        Self::new(&0, &String::from("shit"), &0, &0, &0, &0, &0, &String::from(""), &String::from(""), &String::from(""), &0, &0,
+          &0.0, &0, &0, &0, &0.0, &0, &0, &0, &0, &String::from(""))
+    }
+}
 
 mod imp {
 
 use gtk::glib::ParamSpecDouble;
-use gtk::glib::ParamSpecValueArray;
 use once_cell::sync::Lazy;
 use std::cell::{RefCell, Cell};
 use glib::{ParamFlags, ParamSpec, ParamSpecString, ParamSpecInt64, ParamSpecUInt64, Value};
