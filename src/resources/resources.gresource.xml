@@ -3,6 +3,8 @@
 
   <gresource prefix="/org/transgression/">
     <file compressed="true" preprocess="xml-stripblanks">torrent_detail.ui</file>
+    <file compressed="true" preprocess="xml-stripblanks">main_menu.ui</file>
+    <file compressed="true" preprocess="xml-stripblanks">torrent_list_context_menu.ui</file>
   </gresource>
 </gresources>
 

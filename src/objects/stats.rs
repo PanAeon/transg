@@ -23,7 +23,7 @@ impl Stats {
 
 mod imp {
 
-    use glib::{ParamFlags, ParamSpec, ParamSpecInt64, ParamSpecUInt64, Value};
+    use glib::{ParamFlags, ParamSpec, ParamSpecUInt64, Value};
     use gtk::glib;
     use gtk::prelude::*;
     use gtk::subclass::prelude::*;

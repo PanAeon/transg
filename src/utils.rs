@@ -1,4 +1,5 @@
 //use std::fmt;
+use transg::transmission;
 
 #[derive(Debug, Clone)]
 pub struct Node {
@@ -58,41 +59,38 @@ pub fn format_eta(secs: i64) -> String {
 
 }
 
-fn group(xs: Vec<Vec<String>>) -> Vec<(String, Vec<Vec<String>>)> {
-    if xs.len() == 0 {
-        return vec![];
-    }
-    let mut curr = String::from("");
-    let mut ys: Vec<Vec<String>> = vec![];
-    let mut res: Vec<(String, Vec<Vec<String>>)> = vec![];
 
-    for mut x in xs {
-        let head = x.remove(0);
-        if head != curr {
-          if curr != "" {
-            ys.retain(|x| x.len() > 0);
-            res.push((curr, ys));
-          } 
-          curr = head;
-          ys = vec![x];
-        } else {
-          ys.push(x);
-        }
-    }
-    ys.retain(|x| x.len() > 0);
-    res.push((curr, ys));
-
-    res
-}
-
-pub fn build_tree(parent_path: &String, mut xs: Vec<Vec<String>>) -> (u64, u64, Vec<Node>) {
-    xs.sort_by(|a, b| a[0].partial_cmp(&b[0]).unwrap());
-    let xxs = group(xs);
+pub fn do_build_tree(parent_path: &str, level: usize, xs: Vec<(u64, u64, Vec<String>)> ) -> Vec<Node> {
     let mut ns: Vec<Node> = vec![];
-    for (parent, ys) in xxs {
-          let path = if parent_path == "" { parent.to_string() } else { format!("{}/{}", parent_path, parent) };
-          ns.push(Node { name: parent.to_string(), path: path.clone(), children: build_tree(&path, ys)});
+
+    let mut parents : Vec<String> = xs.iter().filter(|x| x.2.len() > level).map(|x| x.2[level].clone()).collect();
+    parents.sort();
+    parents.dedup();
+
+    for name in parents {
+        let children : Vec<(u64, u64, Vec<String>)> = xs.iter().filter(|x| x.2.len() > level && x.2[level] == name).map(|x| x.clone()).collect();
+        let path = if parent_path == "" { name.to_string() } else { format!("{}/{}", parent_path, name) };
+        let size = children.iter().map(|x| x.0).sum();
+        let downloaded = children.iter().map(|x| x.1).sum();
+        let cs = if children.len() > 1 {
+          do_build_tree(&path, level+1, children)
+        } else {
+            vec![]
+        };
+        ns.push(Node { 
+              name, 
+              path, 
+              children: cs,
+              size,
+              downloaded
+          });
     }
     ns
 }
+pub fn build_tree(files: &Vec<transmission::File> ) -> Vec<Node> {
+    let mut xs : Vec<(u64, u64, Vec<String>)> = files.iter().map(|f| (f.length, f.bytes_completed, f.name.split('/').map(|x| String::from(x)).collect())).collect();
+    xs.sort_by(|a, b| a.2[0].partial_cmp(&b.2[0]).unwrap());
+    do_build_tree("", 0, xs)
+}
+
 

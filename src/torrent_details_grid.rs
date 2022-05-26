@@ -1,5 +1,5 @@
 use glib::Object;
-use gtk::{gio, glib};
+use gtk::glib;
 use crate::objects::TorrentDetailsObject; 
 
 glib::wrapper! {
@@ -89,12 +89,6 @@ impl ObjectImpl for TorrentDetailsGrid {
     fn constructed(&self, obj: &Self::Type) {
         // Call "constructed" on parent
         self.parent_constructed(obj);
-
-//        self.details.borrow().property("name").connect_update(|x| 34 );
-//        self.details.borrow().bind_property("name", &self.name.get(), "label").build();
-//        self.details.borrow().connect_name_notify();
-//            .property_expression("name")
- //           .bind(&self.name, "label", gtk::Widget::NONE);
     }
 
     fn properties() -> &'static [ParamSpec] {

@@ -8,13 +8,15 @@ glib::wrapper! {
 
 impl FileObject {
     pub fn new(
+      name: &String,
       path: &String,
       size: &u64,
       progress: &f64,
       download: bool,
-      priority: u8,
+      priority: i8,
     ) -> Self {
         Object::new(&[
+          ("name", &name),
           ("path", &path),
           ("size", &size),
           ("progress", &progress),
@@ -29,21 +31,21 @@ mod imp {
 
 use gtk::glib::ParamSpecBoolean;
 use gtk::glib::ParamSpecString;
-use gtk::glib::ParamSpecUChar;
 use once_cell::sync::Lazy;
 use std::cell::{RefCell, Cell};
-use glib::{ParamFlags, ParamSpec, ParamSpecUInt64, Value, ParamSpecDouble};
+use glib::{ParamFlags, ParamSpec, ParamSpecChar, ParamSpecUInt64, Value, ParamSpecDouble};
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 
     #[derive(Default)]
     pub struct FileObject {
+      name: RefCell<String>,
       path: RefCell<String>,
       size: Cell<u64>,
       progress: Cell<f64>,
       download: Cell<bool>,
-      priority: Cell<u8>,
+      priority: Cell<i8>,
     }
 
     // The central trait for subclassing a GObject
@@ -60,10 +62,11 @@ use gtk::subclass::prelude::*;
             static PROPERTIES: Lazy<Vec<ParamSpec>> = Lazy::new(|| {
                 vec![
                   ParamSpecString::new( "path", "path", "path", None, ParamFlags::READWRITE,),
+                  ParamSpecString::new( "name", "name", "name", None, ParamFlags::READWRITE,),
                   ParamSpecUInt64::new( "size", "size", "size", u64::MIN, u64::MAX, 0, ParamFlags::READWRITE,),
                   ParamSpecDouble::new( "progress", "progress", "progress", f64::MIN, f64::MAX, 0.0, ParamFlags::READWRITE,),    
                   ParamSpecBoolean::new( "download", "download", "download", false, ParamFlags::READWRITE,),    
-                  ParamSpecUChar::new( "priority", "priority", "priority", u8::MIN, u8::MAX, 0, ParamFlags::READWRITE,),    
+                  ParamSpecChar::new( "priority", "priority", "priority", i8::MIN, i8::MAX, 0, ParamFlags::READWRITE,),    
                 ]
             });
             PROPERTIES.as_ref()
@@ -72,6 +75,7 @@ use gtk::subclass::prelude::*;
         fn set_property(&self, _obj: &Self::Type, _id: usize, value: &Value, pspec: &ParamSpec) {
             match pspec.name() {
                 "path" => { self.path.replace(value.get().expect("The value needs to be of type `String`."));},
+                "name" => { self.name.replace(value.get().expect("The value needs to be of type `String`."));},
                 "size" => { self.size.replace(value.get().expect("The value needs to be of type `u64`."));},
                 "progress" => { self.progress.replace(value.get().expect("The value needs to be of type `u64`."));},
                 "download" => { self.download.replace(value.get().expect("The value needs to be of type `u64`."));},
@@ -83,6 +87,7 @@ use gtk::subclass::prelude::*;
         fn property(&self, _obj: &Self::Type, _id: usize, pspec: &ParamSpec) -> Value {
             match pspec.name() {
                 "path" => self.path.borrow().to_value(),
+                "name" => self.name.borrow().to_value(),
                 "size" => self.size.get().to_value(),
                 "progress" => self.progress.get().to_value(),
                 "download" => self.download.get().to_value(),

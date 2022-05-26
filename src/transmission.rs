@@ -69,7 +69,7 @@ pub struct File {
 #[derive(Deserialize, Debug, Clone)]
 pub struct FileStats {
   pub wanted: bool,
-  pub priority: u64,
+  pub priority: i8,
   #[serde(rename = "bytesCompleted")]
   pub bytes_completed: u64,
 }
@@ -234,6 +234,50 @@ impl TransmissionClient {
             .await?)
     }
 
+    pub async fn queue_move_top(&self, ids: Vec<i64>) -> Result<Value> {
+        Ok(self
+            .execute(json!({
+                 "method": "queue-move-top",
+                 "arguments": {
+                   "ids": &ids
+                 }
+            }))
+            .await?)
+    }
+
+    pub async fn queue_move_up(&self, ids: Vec<i64>) -> Result<Value> {
+        Ok(self
+            .execute(json!({
+                 "method": "queue-move-top",
+                 "arguments": {
+                   "ids": &ids
+                 }
+            }))
+            .await?)
+    }
+
+    pub async fn queue_move_bottom(&self, ids: Vec<i64>) -> Result<Value> {
+        Ok(self
+            .execute(json!({
+                 "method": "queue-move-bottom",
+                 "arguments": {
+                   "ids": &ids
+                 }
+            }))
+            .await?)
+    }
+
+    pub async fn queue_move_down(&self, ids: Vec<i64>) -> Result<Value> {
+        Ok(self
+            .execute(json!({
+                 "method": "queue-move-down",
+                 "arguments": {
+                   "ids": &ids
+                 }
+            }))
+            .await?)
+    }
+
     // returnes also removed array of torrent-id numbers of recently-removed torrents.
     pub async fn get_recent_torrents(&self, fields: &Vec<&str>) -> Result<Value> {
         Ok(self
@@ -277,6 +321,7 @@ impl TransmissionClient {
 
         let response = match response.status() {
             reqwest::StatusCode::CONFLICT => {
+                println!("getting new CSRF token");
                 *sid = response
                     .headers()
                     .get("x-transmission-session-id")

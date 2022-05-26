@@ -1,4 +1,4 @@
-use transg::transmission_client::{Result, TransmissionClient};
+use transg::transmission::{Result, TransmissionClient};
 
 #[allow(dead_code)]
 #[derive(Debug)]

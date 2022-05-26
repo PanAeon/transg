@@ -14,7 +14,9 @@
           mkShell {
             name = "rust-env";
             buildInputs = [
-              rust-bin.nightly.latest.default
+              (rust-bin.nightly.latest.default.override {
+                extensions = ["rust-src"];
+              })
               rustfmt
               clippy
               rust-analyzer
@@ -24,8 +26,9 @@
               gtk4
               material-icons
               openssl
-            ];
+             ];
             PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig:${pkgs.libxml2.dev}/lib/pkgconfig";
+#            RUST_SRC_PATH = "${pkgs.rust.packages.nightly.rustPlatform.rustLibSrc}";
             shellHook = "exec fish";
           };
       });
