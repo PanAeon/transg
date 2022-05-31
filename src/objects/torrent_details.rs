@@ -32,6 +32,8 @@ impl TorrentDetailsObject {
 //        labels: &Vec<String>,
         piece_count: &u64,
         pieces: &String,
+        error: &i64,
+        error_string: &String,
       //  files: &Vec<FileObject>,
       //  file_stats: &Vec<FileStatsObject>,
       //  priorities: &Vec<u8>,
@@ -64,6 +66,8 @@ impl TorrentDetailsObject {
  //           ("labels", &labels),
             ("piece-count", &piece_count),
             ("pieces", &pieces),
+            ("error", &error),
+            ("error-string", &error_string)
           //  ("files", &files),
           //  ("file-stats", &file_stats),
           //  ("priorities", &priorities),
@@ -78,7 +82,7 @@ impl TorrentDetailsObject {
 impl Default for TorrentDetailsObject {
     fn default() -> Self {
         Self::new(&0, &String::from("shit"), &0, &0, &0, &0, &0, &String::from(""), &String::from(""), &String::from(""), &0, &0,
-          &0.0, &0, &0, &0, &0.0, &0, &0, &0, &0, &String::from(""))
+          &0.0, &0, &0, &0, &0.0, &0, &0, &0, &0, &String::from(""), &0, &String::from(""))
     }
 }
 
@@ -117,6 +121,8 @@ use gtk::subclass::prelude::*;
         //labels: RefCell<Vec<String>>,
         piece_count: Cell<u64>,
         pieces: RefCell<String>,
+        error: Cell<i64>,
+        error_string: RefCell<String>,
      //   files: RefCell<Vec<FileObject>>,
      //   file_stats: RefCell<Vec<FileStatsObject>>,
      //   priorities: RefCell<Vec<u8>>,
@@ -162,6 +168,8 @@ ParamSpecUInt64::new( "corrupt-ever", "corrupt-ever", "corrupt-ever", u64::MIN, 
 //ParamSpecValueArray::new("labels", "labels", "labels", &ParamSpecString::new("s", "s", "s", None, ParamFlags::READWRITE), ParamFlags::READWRITE,),
 ParamSpecUInt64::new( "piece-count", "piece-count", "piece-count", u64::MIN, u64::MAX, 0, ParamFlags::READWRITE,),
 ParamSpecString::new( "pieces", "pieces", "pieces", None, ParamFlags::READWRITE,),
+ParamSpecInt64::new( "error", "error", "error", i64::MIN, i64::MAX, 0, ParamFlags::READWRITE,),
+ParamSpecString::new( "error-string", "error-string", "error-string", None, ParamFlags::READWRITE,),
 //ParamSpecValueArray::new("files", "files", "files", FileObject::static_type(), ParamFlags::READWRITE,),
 //ParamSpecValueArray::new("file-stats", "file-stats", "file-stats", FileStatsObject::static_type(), ParamFlags::READWRITE,),
 //ParamSpecValueArray::new("priorities", "priorities", "priorities", ParamSpecUChar::new("c", "c", "c", u8::MIN, u8::MAX, 0, ParamFlags::READWRITE), ParamFlags::READWRITE,),
@@ -199,6 +207,8 @@ ParamSpecString::new( "pieces", "pieces", "pieces", None, ParamFlags::READWRITE,
 //"labels" =>  {  self.labels.replace(value.get().expect("The value needs to be of type `Vec<String>`."));},
 "piece-count" => {   self.piece_count.replace(value.get().expect("The value needs to be of type `u64`."));},
 "pieces" =>  {  self.pieces.replace(value.get().expect("The value needs to be of type `String`."));},
+"error" =>  {  self.error.replace(value.get().expect("The value needs to be of type `String`."));},
+"error-string" =>  {  self.error_string.replace(value.get().expect("The value needs to be of type `String`."));},
 //"files" =>  {  self.files.replace(value.get_owned().expect("The value needs to be of type `Vec<File>`."));},
 //"file-stats" => {   self.file_stats.replace(value.get().expect("The value needs to be of type `Vec<FileStats>`."));},
 //"priorities" =>  {  self.priorities.replace(value.get().expect("The value needs to be of type `Vec<u8>`."));},
@@ -235,6 +245,8 @@ ParamSpecString::new( "pieces", "pieces", "pieces", None, ParamFlags::READWRITE,
 //"labels" => self.labels.borrow().to_value(),
 "piece-count" => self.piece_count.get().to_value(),
 "pieces" => self.pieces.borrow().to_value(),
+"error" => self.error.get().to_value(),
+"error-string" => self.error_string.borrow().to_value(),
 //"files" => self.files.borrow().to_value(),
 //"file-stats" => self.file_stats.borrow().to_value(),
 //"priorities" => self.priorities.borrow().to_value(),

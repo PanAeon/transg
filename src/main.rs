@@ -1,27 +1,67 @@
 mod objects;
 mod utils;
 mod torrent_details_grid;
+mod magnet_tools;
+mod notification_utils;
+mod command_processor;
 use crate::objects::{ TorrentInfo, TorrentDetailsObject, Stats, PeerObject, TrackerObject, FileObject, CategoryObject};
 use crate::torrent_details_grid::TorrentDetailsGrid;
 use gtk::TreeListRow;
 use transg::transmission;
+use magnet_tools::magnet_to_metainfo;
+use base64;
+use magnet_url::Magnet;
+use urlencoding;
  
 use gtk::prelude::*;
 use gtk::Application;
 use glib::clone;
 use gtk::glib;
 use gtk::gio;
+use utils::format_time;
 //use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use gio::ListStore;
 use lazy_static::lazy_static;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 //use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc;
 use std::thread;
 use std::fs;
+use async_std::task;
 
+        use transmission::TransmissionClient;
+
+        
+        enum TorrentUpdate {
+          Full(serde_json::Value),
+          Partial(serde_json::Value, serde_json::Value, u64),
+          Stats(transmission::SessionStats),
+          FreeSpace(transmission::FreeSpace),
+        }
+
+        enum TorrentCmd {
+            Tick(u64),
+            OpenDlDir(i64),
+            OpenDlTerm(i64),
+            GetDetails(i64),
+            QueueMoveUp(Vec<i64>),
+            QueueMoveDown(Vec<i64>),
+            QueueMoveTop(Vec<i64>),
+            QueueMoveBottom(Vec<i64>),
+            Delete(Vec<i64>, bool),
+            Start(Vec<i64>),
+            StartNow(Vec<i64>),
+            Stop(Vec<i64>),
+            Verify(Vec<i64>),
+            Reannounce(Vec<i64>),
+            Move(Vec<i64>, String, bool),
+            AddTorrent(Option<String>, Option<String>, Option<String>, bool) // download dir, filename, metainfo, start_paused
+        }
+
+        
 
 #[derive(Debug)]
 struct TorrentGroupStats {
@@ -33,6 +73,7 @@ struct TorrentGroupStats {
     num_checking: u64,
     num_stopped: u64,
     num_queue_checking: u64,
+    num_error: u64,
     folders: HashMap<String, u64>,
 }
 
@@ -46,6 +87,7 @@ fn empty_group_stats() -> TorrentGroupStats {
       num_queue_checking: 0,
       num_stopped: 0,
       num_seeding: 0,
+      num_error: 0,
       folders: HashMap::new(),
     }
 }
@@ -84,6 +126,7 @@ const SEEDING: i64 = 6;
 const ALL: i64 = -1;
 const SEPARATOR: i64 = -2;
 const FOLDER: i64 = -3;
+const ERROR: i64 = -4;
 
 const NONE_EXPRESSION: Option<&gtk::Expression> = None;
 //const NO_SHOW: u64 = u64::MAX;
@@ -123,6 +166,10 @@ fn update_torrent_stats(model: &ListStore, category_model: &ListStore) {
                  let mut group_stats = empty_group_stats();
                  while let Some(x) = model.item(i) {
                    let status = x.property_value("status").get::<i64>().expect("skdfj");
+                   let error = x.property_value("error").get::<i64>().expect("skdfj");
+                   if error != 0 {
+                       group_stats.num_error += 1;
+                   }
                    let folder = x.property_value("download-dir").get::<String>().expect("skdfj1");
                    *group_stats.folders.entry(folder).or_insert(1) += 1;
                    group_stats.num_total += 1;
@@ -160,6 +207,7 @@ fn update_torrent_stats(model: &ListStore, category_model: &ListStore) {
                        DOWNLOADING => group_stats.num_downloading,
                        SEED_QUEUED => group_stats.num_queue_up,
                        SEEDING     => group_stats.num_seeding,
+                       ERROR       => group_stats.num_error,
                        _ => 0,
                      };
                      x.set_property("count", n.to_value());
@@ -200,13 +248,14 @@ fn build_ui(app: &Application) {
         CategoryObject::new("Downloading".to_string(), 0, DOWNLOADING, false, "".to_string()),
         CategoryObject::new("Seeding queued".to_string(), 0, SEED_QUEUED, false, "".to_string()),
         CategoryObject::new("Seeding".to_string(), 0, SEEDING, false, "".to_string()),
+        CategoryObject::new("Error".to_string(), 0, ERROR, false, "".to_string()),
         CategoryObject::new("-".to_string(), 0, SEPARATOR, false, "".to_string()),
     ]);
 
     let details_object = TorrentDetailsObject::new(
         &u64::MAX, &"".to_string(), &0, &0, &0, &0, &0, &"".to_string(), &"".to_string(), 
         &"".to_string(), &0, &0, &0.0, &0, &0, &0, &0.0, 
-        &0, &0, &0, &0, &"".to_string()
+        &0, &0, &0, &0, &"".to_string(), &0, &"".to_string()
         );
 
     let peers_model = gio::ListStore::new(PeerObject::static_type());
@@ -222,7 +271,16 @@ fn build_ui(app: &Application) {
     css_provider.load_from_data(r#"
     window {
       font-size: 14px;
+      border-radius: 0;
+	  box-shadow: none;
     }
+    decoration {
+	box-shadow: none;
+}
+
+decoration:backdrop {
+	box-shadow: none;
+}
     .sidebar-category-name {
       font-size: 14px;
     }
@@ -232,6 +290,10 @@ fn build_ui(app: &Application) {
     }
     .details-label {
       font-weight: bold;
+    }
+    .simple-dialog > .dialog-vbox {
+      padding: 10px 20px 20px 10px;
+      background-color: @theme_bg_color;
     }
     .sidebar > row {
         margin-top: 4px;
@@ -253,36 +315,110 @@ fn build_ui(app: &Application) {
     window.set_titlebar(Some(&header_bar));
 
 
-    let menu_button = gtk::MenuButton::new();
-    menu_button.set_icon_name("open-menu-symbolic");
-    header_bar.pack_end(&menu_button);
+//    let menu_button = gtk::MenuButton::new();
+//    menu_button.set_icon_name("open-menu-symbolic");
+    let settings_button = gtk::ToggleButton::new();
+    settings_button.set_icon_name("emblem-system-symbolic");
+    header_bar.pack_end(&settings_button);
 
 
-    let menu_builder = gtk::Builder::from_resource("/org/transgression/main_menu.ui");
-    let menu_model = menu_builder.object::<gio::MenuModel>("menu").expect("can't find menu");
-    menu_button.set_menu_model(Some(&menu_model));
-    menu_button.set_primary(true);
+    //let menu_builder = gtk::Builder::from_resource("/org/transgression/main_menu.ui");
+    //let menu_model = menu_builder.object::<gio::MenuModel>("menu").expect("can't find menu");
+    //menu_button.set_menu_model(Some(&menu_model));
+    //menu_button.set_primary(true);
 
     let search_button = gtk::ToggleButton::new();
     search_button.set_icon_name("system-search-symbolic");
     header_bar.pack_end(&search_button);
 
-    let sort_button = gtk::ToggleButton::new();
+
+    let sort_button = gtk::Button::new();
     sort_button.set_icon_name("view-list-symbolic");
     header_bar.pack_end(&sort_button);
+
+    let sort_popover = gtk::Popover::new();
+    let sort_box = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    let sort_label = gtk::Label::new(Some("Sort by"));
+    let sort_by_date_added = gtk::CheckButton::builder().label("Date added").build();
+    let sort_by_name = gtk::CheckButton::builder().label("Name").group(&sort_by_date_added).build();
+    let sort_by_size = gtk::CheckButton::builder().label("Size").group(&sort_by_date_added).build();
+    let sort_by_uploaded = gtk::CheckButton::builder().label("Uploaded bytes").group(&sort_by_date_added).build();
+    let sort_by_ratio = gtk::CheckButton::builder().label("Ratio").group(&sort_by_date_added).build();
+    let sort_by_upload_speed = gtk::CheckButton::builder().label("Upload speed").group(&sort_by_date_added).build();
+
+    let date_added_sorter = sort_by_property::<i64>("added-date", true); 
+    let _sorter = gtk::SortListModel::new(Some(&model), Some(&date_added_sorter));
+
+    sort_by_date_added.connect_toggled(clone!(@weak _sorter => move |_|{
+      _sorter.set_sorter(Some(&date_added_sorter));
+    }));
+    let name_sorter = sort_by_property::<String>("name", false);
+
+    sort_by_name.connect_toggled(clone!(@weak _sorter => move |_|{
+      _sorter.set_sorter(Some(&name_sorter));
+    }));
+
+    let size_sorter = sort_by_property::<i64>("size_when_done", true);
+
+    sort_by_size.connect_toggled(clone!(@weak _sorter => move |_|{
+      _sorter.set_sorter(Some(&size_sorter));
+    }));
+    let uploaded_sorter = sort_by_property::<i64>("uploaded_ever", true);
+
+    sort_by_uploaded.connect_toggled(clone!(@weak _sorter => move |_|{
+      _sorter.set_sorter(Some(&uploaded_sorter));
+    }));
+
+    let ratio_sorter = sort_by_property::<f64>("upload_ratio", true);
+
+    sort_by_ratio.connect_toggled(clone!(@weak _sorter => move |_|{
+      _sorter.set_sorter(Some(&ratio_sorter));
+    }));
+    let upload_speed_sorter = sort_by_property::<i64>("rate_upload", true); 
+
+    sort_by_upload_speed.connect_toggled(clone!(@weak _sorter => move |_|{
+      _sorter.set_sorter(Some(&upload_speed_sorter));
+    }));
+
+    sort_box.append(&sort_label);
+    sort_box.append(&sort_by_date_added);
+    sort_box.append(&sort_by_name);
+    sort_box.append(&sort_by_size);
+    sort_box.append(&sort_by_uploaded);
+    sort_box.append(&sort_by_ratio);
+    sort_box.append(&sort_by_upload_speed);
+    sort_box.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    let reverse_sort_order = gtk::CheckButton::builder().label("Reverse sort order").build();
+    sort_box.append(&reverse_sort_order);
+    sort_popover.set_child(Some(&sort_box));
+    //sort_popover.set_pointing_to(&sort_button);
+    sort_popover.set_parent(&sort_button);
+    sort_popover.set_position(gtk::PositionType::Bottom);
+
+    sort_by_date_added.set_active(true);
+    sort_button.connect_clicked(clone!( @weak sort_popover => move |_| {
+       sort_popover.popup();
+    }));
 
     let add_button = gtk::Button::new();
     add_button.set_icon_name("list-add");
     header_bar.pack_start(&add_button);
 
+    let add_magnet_button = gtk::Button::new();
+    add_magnet_button.set_icon_name("emblem-shared-symbolic");
+    header_bar.pack_start(&add_magnet_button);
+
+
     let start_button = gtk::Button::new();
     start_button.set_icon_name("media-playback-start");
     header_bar.pack_start(&start_button);
+    start_button.set_action_name(Some("win.torrent-start"));
 
 
     let pause_button = gtk::Button::new();
     pause_button.set_icon_name("media-playback-pause");
     header_bar.pack_start(&pause_button);
+    pause_button.set_action_name(Some("win.torrent-stop"));
 
     let queue_up_button = gtk::Button::new();
     queue_up_button.set_icon_name("go-up");
@@ -297,13 +433,45 @@ fn build_ui(app: &Application) {
     let remove_button = gtk::Button::new();
     remove_button.set_icon_name("list-remove");
     header_bar.pack_start(&remove_button);
+    remove_button.set_action_name(Some("win.torrent-remove"));
 
     let remove_with_files_button = gtk::Button::new();
     remove_with_files_button.set_icon_name("edit-delete");
     header_bar.pack_start(&remove_with_files_button);
+    remove_with_files_button.set_action_name(Some("win.torrent-remove-with-data"));
 
+    let topstack = gtk::Stack::new();
     let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    window.set_child(Some(&container));
+    topstack.add_named(&container, Some("main"));
+    let settings_hbox = gtk::Box::new(gtk::Orientation::Horizontal,0);
+    let settings_sidebar = gtk::StackSidebar::new();
+    settings_hbox.append(&settings_sidebar);
+    let settings_stack = gtk::Stack::new();
+    settings_stack.set_transition_type(gtk::StackTransitionType::SlideUpDown);
+    settings_sidebar.set_stack(&settings_stack);
+
+
+    let l1 = gtk::Label::new(Some("l1"));
+    settings_stack.add_titled(&l1, None, "Connections");
+    let l2 = gtk::Label::new(Some("l1"));
+    settings_stack.add_titled(&l2, None, "General");
+    let l3 = gtk::Label::new(Some("l1"));
+    settings_stack.add_titled(&l3, None, "Actions");
+    let l4 = gtk::Label::new(Some("l2"));
+    settings_stack.add_titled(&l4, None, "Folders");
+
+    settings_hbox.append(&settings_stack);
+    topstack.add_named(&settings_hbox, Some("settings"));
+    topstack.set_visible_child_name("main");
+    window.set_child(Some(&topstack));
+    
+    settings_button.connect_toggled(clone!(@weak topstack => move |button| {
+      if button.is_active() {
+         topstack.set_visible_child_name("settings");
+      } else {
+         topstack.set_visible_child_name("main");
+      }
+    }));
 
 
     // TODO: move to a separate file
@@ -311,29 +479,6 @@ fn build_ui(app: &Application) {
     //let selected_torrent_mutex : Arc<Mutex<Option<i64>>> = Arc::new(Mutex::new(None));
     //let selected_torrent_mutex_read = selected_torrent_mutex.clone();
     //        fucking transmission get torrents 
-        use transmission::TransmissionClient;
-
-        
-        enum TorrentUpdate {
-          Full(serde_json::Value),
-          Partial(serde_json::Value, serde_json::Value, u64),
-          Stats(transmission::SessionStats),
-          FreeSpace(transmission::FreeSpace),
-        }
-
-        enum TorrentCmd {
-            Tick(u64),
-            OpenDlDir(i64),
-            OpenDlTerm(i64),
-            GetDetails(i64),
-            QueueMoveUp(Vec<i64>),
-            QueueMoveDown(Vec<i64>),
-            QueueMoveTop(Vec<i64>),
-            QueueMoveBottom(Vec<i64>)
-        }
-
-
-        
 
         use glib::{MainContext, PRIORITY_DEFAULT};
 
@@ -349,7 +494,7 @@ fn build_ui(app: &Application) {
               .map(|it| {
                   json_value_to_torrent_info(it)
               }).collect();
-              torrents.sort_by(|a, b| b.property_value("id").get::<i64>().expect("fkjf").cmp(&a.property_value("id").get::<i64>().expect("xx")));
+              torrents.sort_by(|a, b| a.property_value("id").get::<i64>().expect("fkjf").cmp(&b.property_value("id").get::<i64>().expect("xx")));
               model.remove_all();
               model.splice(0, 0, &torrents);
               update_torrent_stats(&model, &category_model );
@@ -376,10 +521,10 @@ fn build_ui(app: &Application) {
                 //"sizeWhenDone", "downloadDir", "uploadedEver", "uploadRatio", "addedDate"];
                   let mut xxs = xs.as_array().unwrap().clone(); 
                   xxs.remove(0);
-                  xxs.sort_by(|a, b| b.as_array().unwrap()[0].as_i64().unwrap().cmp(&a.as_array().unwrap()[0].as_i64().unwrap()));
+                  xxs.sort_by(|a, b| a.as_array().unwrap()[0].as_i64().unwrap().cmp(&b.as_array().unwrap()[0].as_i64().unwrap()));
 
+                  let mut i = 0;
                   for x in xxs.iter() {
-                      let mut i = 0;
                       let ys = x.as_array().unwrap();
                       while let Some(y) = model.item(i) {
                         if ys[0].as_i64().unwrap() == y.property_value("id").get::<i64>().expect("skdfj") {
@@ -402,6 +547,9 @@ fn build_ui(app: &Application) {
                           y.set_property("upload-ratio", ys[18].as_f64().unwrap().to_value());
                           y.set_property("added-date", ys[19].as_i64().unwrap().to_value());
                           break;
+                        } else if ys[0].as_i64().unwrap() < y.property_value("id").get::<i64>().expect("skdfj") {
+                            model.insert(i, &json_value_to_torrent_info(x));
+                            break; // TODO: please, test this..
                         }
                         i+=1;
                       }
@@ -451,6 +599,8 @@ fn build_ui(app: &Application) {
 //            details_object.set_property("labels", details.labels.to_value());
             details_object.set_property("piece-count", details.piece_count.to_value());
             details_object.set_property("pieces", details.pieces.to_value());
+            details_object.set_property("error", details.error.to_value());
+            details_object.set_property("error-string", details.error_string.to_value());
 
             if previous_id != details.id {
               let stupid_model = create_file_model(&Rc::new(RefCell::new(utils::build_tree(&details.files))));
@@ -483,7 +633,6 @@ fn build_ui(app: &Application) {
            Continue(true)
         }));
 
-        let client = TransmissionClient::new(&"http://192.168.1.217:9091/transmission/rpc".to_string());
         let (tx2, rx2) = mpsc::channel(); 
 
         let sender = tx2.clone();
@@ -503,6 +652,7 @@ fn build_ui(app: &Application) {
         thread::spawn(move || {
           use tokio::runtime::Runtime;
           let rt = Runtime::new().expect("create tokio runtime");
+          let client = TransmissionClient::new(&"http://192.168.1.217:9091/transmission/rpc".to_string());
 
 
           rt.block_on(async {
@@ -529,11 +679,11 @@ fn build_ui(app: &Application) {
                 let foo = client.get_recent_torrents(&TORRENT_INFO_FIELDS).await.expect("oops2");
                 let torrents = foo.get("arguments").unwrap().get("torrents").unwrap().to_owned(); 
                 let removed  = foo.get("arguments").unwrap().get("removed").unwrap().to_owned(); 
-                //println!("Received {} torrents", torrents.as_array().unwrap().len());
-                let num_torrents = torrents.as_array().unwrap().len();
-                if num_torrents < 100 { // FIXME: more efficient merge.., maybe by id
+//                println!("Received {} torrents", torrents.as_array().unwrap().len());
+                //let num_torrents = torrents.as_array().unwrap().len();
+                //if num_torrents < 100 { 
                   tx.send(TorrentUpdate::Partial(torrents, removed, i)).expect("blah");
-                }
+                //}
 
                 if i % 3 == 0 {
                   let stats = client.get_session_stats().await.expect("boo");
@@ -600,10 +750,57 @@ fn build_ui(app: &Application) {
                     client.queue_move_top(ids).await.expect("oops3"); // TODO: proper error handling 
                 },
                 TorrentCmd::QueueMoveBottom(ids) => {
-                    println!("IDs: {:?}", ids);
                     client.queue_move_bottom(ids).await.expect("oops3"); // TODO: proper error handling 
-                    println!("???")
                 },
+                TorrentCmd::Delete(ids, delete_local_data) => {
+                    client.torrent_remove(ids, delete_local_data).await.expect("oops3"); // TODO: proper error handling 
+                },
+                TorrentCmd::Start(ids) => {
+                    client.torrent_start(ids).await.expect("oops3"); // TODO: proper error handling 
+                },
+                TorrentCmd::StartNow(ids) => {
+                    client.torrent_start_now(ids).await.expect("oops3"); // TODO: proper error handling 
+                },
+                TorrentCmd::Stop(ids) => {
+                    client.torrent_stop(ids).await.expect("oops3"); // TODO: proper error handling 
+                },
+                TorrentCmd::Verify(ids) => {
+                    client.torrent_verify(ids).await.expect("oops3"); // TODO: proper error handling 
+                },
+                TorrentCmd::Reannounce(ids) => {
+                    client.torrent_reannounce(ids).await.expect("oops3"); // TODO: proper error handling 
+                },
+                TorrentCmd::Move(ids, location, is_move) => {
+                    client.torrent_move(ids, &location, is_move).await.expect("ooph4");
+                },
+                TorrentCmd::AddTorrent(download_dir, filename, metainfo, paused) => {
+                    let tadd = transmission::TorrentAdd {
+                        cookies: None,
+                        bandwith_priority: None,
+                        download_dir,
+                        filename,
+                        metainfo,
+                        files_unwanted: None,
+                        files_wanted: None,
+                        labels: None,
+                        paused: Some(paused),
+                        peer_limit: None,
+                        priority_high: None,
+                        priority_low: None,
+                        priority_normal: None
+                    };
+                    println!("adding torrent");
+                    let res = client.torrent_add(&tadd).await.expect("ooph5");
+                    let result = res.as_object().expect("should return object").get("result").expect("must result").as_str().unwrap().to_string();
+                    if result == "success" {
+                       //  TODO: use gtk notifications
+                    //    let _ =  notify("Torrent Added!", "").await; // TODO: add name
+                    } else {
+                     //   let _ = notify("Error!", "").await;
+                      println!("{:?}", res);
+                    }
+                    println!("{:?}", res);
+                }
             }
           });
 
@@ -613,17 +810,8 @@ fn build_ui(app: &Application) {
    
     //      end of transmission code
 
-    let id_factory = gtk::SignalListItemFactory::new();
-
-    id_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TorrentInfo>("id")
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    //let id_factory = gtk::SignalListItemFactory::new();
+    //id_factory.connect_setup(label_setup::<TorrentInfo, i64, _>("id", |x| format!("{}", x)));
 
     //id_factory.connect_bind(move |_, _list_item| {
     //    let id = _list_item.property::<TorrentInfo>("item").property_value("id").get::<i64>().expect("skdfj");
@@ -649,12 +837,30 @@ fn build_ui(app: &Application) {
         list_item.set_child(Some(&hbox));
         label.set_halign(gtk::Align::Start);
         let icon = gtk::Image::new();
+        let error_icon = gtk::Image::new();
+        error_icon.set_icon_name(Some("dialog-error-symbolic"));
         hbox.append(&icon);
+        hbox.append(&error_icon);
         hbox.append(&label);
 
         list_item
             .property_expression("item")
-            .chain_property::<TorrentInfo>("status")
+            .chain_property::<TorrentInfo>("error") // FIXME: now I need also to merge error here somehow
+            .chain_closure::<bool>(gtk::glib::closure!(|_: Option<glib::Object>, error: i64| {
+                error > 0
+            }))
+            .bind(&error_icon, "visible", gtk::Widget::NONE);
+
+        list_item
+            .property_expression("item")
+            .chain_property::<TorrentInfo>("error") // FIXME: now I need also to merge error here somehow
+            .chain_closure::<bool>(gtk::glib::closure!(|_: Option<glib::Object>, error: i64| {
+                error == 0
+            }))
+            .bind(&icon, "visible", gtk::Widget::NONE);
+        list_item
+            .property_expression("item")
+            .chain_property::<TorrentInfo>("status") // FIXME: now I need also to merge error here somehow
             .chain_closure::<String>(gtk::glib::closure!(|_: Option<gtk::glib::Object>, status: i64| {
               match status {
                 STOPPED => "media-playback-stop",
@@ -674,64 +880,18 @@ fn build_ui(app: &Application) {
             .chain_property::<TorrentInfo>("name")
             .bind(&label, "label", gtk::Widget::NONE);
     });
-/*
- * 0 	Torrent is stopped
-1 	Torrent is queued to verify local data
-2 	Torrent is verifying local data
-3 	Torrent is queued to download
-4 	Torrent is downloading
-5 	Torrent is queued to seed
-6 	Torrent is seeding
- */
-    let status_factory = gtk::SignalListItemFactory::new();
-    status_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
 
-        list_item
-            .property_expression("item")
-            .chain_property::<TorrentInfo>("status")
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+   // let status_factory = gtk::SignalListItemFactory::new();
+   // status_factory.connect_setup(label_setup::<TorrentInfo, i64, _>("status", |x| format!("{}", x)));
 
     let eta_factory = gtk::SignalListItemFactory::new();
-    eta_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TorrentInfo>("eta")
-            .chain_closure::<String>(gtk::glib::closure!(|_: Option<gtk::glib::Object>, secs: i64| {
-                utils::format_eta(secs)
-            }))
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    eta_factory.connect_setup(label_setup::<TorrentInfo, i64, _>("eta", utils::format_eta));
 
     let ratio_factory = gtk::SignalListItemFactory::new();
-    ratio_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TorrentInfo>("upload-ratio")
-            .chain_closure::<String>(gtk::glib::closure!(|_: Option<gtk::glib::Object>, i: f64| {
-              format!("{:.2}", i)
-            }))
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    ratio_factory.connect_setup(label_setup::<TorrentInfo, f64, _>("upload-ratio", |x| format!("{:.2}", x)));
 
     let num_peers_factory = gtk::SignalListItemFactory::new();
-    num_peers_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TorrentInfo>("peers-connected")
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    num_peers_factory.connect_setup(label_setup::<TorrentInfo, i64, _>("peers-connected", |x| if x > 0 {format!("{}", x)} else {"".to_string()}));
 
     let completion_factory = gtk::SignalListItemFactory::new();
     completion_factory.connect_setup(move |_, list_item| {
@@ -747,72 +907,18 @@ fn build_ui(app: &Application) {
     });
     
     let download_speed_factory = gtk::SignalListItemFactory::new(); // TODO: generalize
-    download_speed_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TorrentInfo>("rate-download")
-            .chain_closure::<String>(gtk::glib::closure!(|_: Option<gtk::glib::Object>, i: i64| {
-                utils::format_download_speed(i)
-            }))
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    download_speed_factory.connect_setup(label_setup::<TorrentInfo, i64, _>("rate-download", utils::format_download_speed));
 
 
     let upload_speed_factory = gtk::SignalListItemFactory::new();
-    upload_speed_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TorrentInfo>("rate-upload")
-            .chain_closure::<String>(gtk::glib::closure!(|_: Option<gtk::glib::Object>, i: i64| {
-                utils::format_download_speed(i)
-            }))
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    upload_speed_factory.connect_setup(label_setup::<TorrentInfo, i64, _>("rate-upload", utils::format_download_speed));
 
 
     let total_size_factory = gtk::SignalListItemFactory::new();
-    total_size_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TorrentInfo>("size-when-done")
-            .chain_closure::<String>(gtk::glib::closure!(|_: Option<gtk::glib::Object>, i: i64| {
-                utils::format_size(i)
-            }))
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    total_size_factory.connect_setup(label_setup::<TorrentInfo, i64, _>("size-when-done", utils::format_size));
 
     let uploaded_ever_factory = gtk::SignalListItemFactory::new();
-    uploaded_ever_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TorrentInfo>("uploaded-ever")
-            .chain_closure::<String>(gtk::glib::closure!(|_: Option<gtk::glib::Object>, i: i64| {
-                if i == 0 {
-                  "".to_string()
-                } else if i > 1024*1024*1024*1024 {
-                  format!("{:.2} Tib", i as f64 / (1024.0 * 1024.0 * 1024.0 * 1024.0))
-                } else if i > 1024*1024*1024 {
-                  format!("{:.2} Gib", i as f64 / (1024.0 * 1024.0 * 1024.0))
-                } else if i > 1024*1024 {
-                  format!("{:.2} Mib", i as f64 / (1024.0 * 1024.0))
-                } else {
-                  format!("{:.2} Kib", i as f64 / 1024.0)
-                }
-            }))
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    uploaded_ever_factory.connect_setup(label_setup::<TorrentInfo, i64, _>("uploaded-ever", utils::format_size));
 
     // location, but right now custom actions:what
     //let download_dir_factory = gtk::SignalListItemFactory::new();
@@ -862,43 +968,25 @@ fn build_ui(app: &Application) {
     //    // now we need a new thread as we want to open top-folder if it exists, not a parent folder
     //});
 
-    let added_date_factory = gtk::SignalListItemFactory::new();
-    added_date_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
+    //let added_date_factory = gtk::SignalListItemFactory::new();
+    //added_date_factory.connect_setup(move |_, list_item| {
+    //    let label = gtk::Label::new(None);
+    //    list_item.set_child(Some(&label));
 
-        list_item
-            .property_expression("item")
-            .chain_property::<TorrentInfo>("added-date")
-            .chain_closure::<String>(gtk::glib::closure!(|_: Option<gtk::glib::Object>, _d: i64| {
-                ""
-            }))
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    //    list_item
+    //        .property_expression("item")
+    //        .chain_property::<TorrentInfo>("added-date")
+    //        .chain_closure::<String>(gtk::glib::closure!(|_: Option<gtk::glib::Object>, _d: i64| {
+    //            ""
+    //        }))
+    //        .bind(&label, "label", gtk::Widget::NONE);
+    //});
     
     
 //    let downloading_filter = gtk::FilterListModel::new(Some(&model), Some(&gtk::CustomFilter::new(|x|{ x.property_value("status").get::<i64>().expect("foo") == 4 })));
 
 
-    let _sorter = gtk::SortListModel::new(Some(&model), Some(&gtk::CustomSorter::new(|x,y|{
-        if x.property_value("added-date").get::<i64>().expect("ad") > y.property_value("added-date").get::<i64>().expect("ad") {
-            gtk::Ordering::Smaller
-        } else if x.property_value("added-date").get::<i64>().expect("ad") < y.property_value("added-date").get::<i64>().expect("ad") {
-            gtk::Ordering::Larger
-        } else {
-            gtk::Ordering::Equal
-        }
-    })));
 
-    let _sorter2 = gtk::SortListModel::new(Some(&model), Some(&gtk::CustomSorter::new(|x,y|{
-        if x.property_value("peers-connected").get::<i64>().expect("ad") > y.property_value("peers-connected").get::<i64>().expect("ad") {
-            gtk::Ordering::Smaller
-        } else if x.property_value("peers-connected").get::<i64>().expect("ad") < y.property_value("peers-connected").get::<i64>().expect("ad") {
-            gtk::Ordering::Larger
-        } else {
-            gtk::Ordering::Equal
-        }
-    })));
 //    let _filter = gtk::FilterListModel::new(Some(&_sorter), Some(&gtk::CustomFilter::new(|x|{ x.property_value("rate-upload").get::<i64>().expect("foo") > 0 })));
     let name_expr = gtk::PropertyExpression::new(TorrentInfo::static_type(), NONE_EXPRESSION, "name");
     let name_filter = gtk::StringFilter::new(Some(name_expr));
@@ -1098,6 +1186,7 @@ torrent_selection_model.connect_selection_changed(move |_model, _pos, _num_items
                 SEED_QUEUED => "network-transmit-symbolic",
                 SEEDING => "arrow-up-symbolic",
                 FOLDER  => "folder-symbolic",
+                ERROR   => "dialog-error-symbolic",
                 SEPARATOR => "",
                 _ => "dialog-question-symbolic"
               }
@@ -1158,6 +1247,10 @@ torrent_selection_model.connect_selection_changed(move |_model, _pos, _num_items
               category_filter.set_filter_func(move |item| {
                   item.property_value("download-dir").get::<String>().unwrap() == download_dir
               });
+            } else if status == ERROR {
+                category_filter.set_filter_func(move |item| {
+                    item.property_value("error").get::<i64>().unwrap() > 0 
+                });
             } else {
                 category_filter.set_filter_func(move |item| {
                     item.property_value("status").get::<i64>().unwrap() == status 
@@ -1207,6 +1300,13 @@ torrent_selection_model.connect_selection_changed(move |_model, _pos, _num_items
     let action_queue_down = gio::SimpleAction::new("queue-down", None);
     let action_queue_top = gio::SimpleAction::new("queue-top", None);
     let action_queue_bottom = gio::SimpleAction::new("queue-bottom", None);
+    let action_torrent_start = gio::SimpleAction::new("torrent-start", None);
+    let action_torrent_start_now = gio::SimpleAction::new("torrent-start-now", None);
+    let action_torrent_stop = gio::SimpleAction::new("torrent-stop", None);
+    let action_torrent_verify = gio::SimpleAction::new("torrent-verify", None);
+    let action_torrent_reannounce = gio::SimpleAction::new("torrent-reannounce", None);
+    let action_torrent_remove = gio::SimpleAction::new("torrent-remove", None);
+    let action_torrent_remove_data = gio::SimpleAction::new("torrent-remove-with-data", None);
     window.add_action(&action_open_folder);
     window.add_action(&action_open_term);
     window.add_action(&action_move_torrent);
@@ -1214,7 +1314,84 @@ torrent_selection_model.connect_selection_changed(move |_model, _pos, _num_items
     window.add_action(&action_queue_down);
     window.add_action(&action_queue_top);
     window.add_action(&action_queue_bottom);
+    window.add_action(&action_torrent_start);
+    window.add_action(&action_torrent_stop);
+    window.add_action(&action_torrent_verify);
+    window.add_action(&action_torrent_remove);
+    window.add_action(&action_torrent_remove_data);
+    window.add_action(&action_torrent_start_now);
+    window.add_action(&action_torrent_reannounce);
     
+    let sender = tx2.clone();
+    action_torrent_start.connect_activate(clone!(@weak torrent_selection_model => move |_action, _| {
+      let mut xs = vec![];
+      let mut i = 0;
+      while let Some(item) = torrent_selection_model.item(i) {
+          if torrent_selection_model.is_selected(i) {
+            let id = item.property_value("id").get::<i64>().expect("id must");
+            xs.push(id);
+          }
+          i += 1;
+      }
+      sender.send(TorrentCmd::Start(xs)).expect("can't send torrent_cmd"); 
+    }));
+
+    let sender = tx2.clone();
+    action_torrent_start_now.connect_activate(clone!(@weak torrent_selection_model => move |_action, _| {
+      let mut xs = vec![];
+      let mut i = 0;
+      while let Some(item) = torrent_selection_model.item(i) {
+          if torrent_selection_model.is_selected(i) {
+            let id = item.property_value("id").get::<i64>().expect("id must");
+            xs.push(id);
+          }
+          i += 1;
+      }
+      sender.send(TorrentCmd::StartNow(xs)).expect("can't send torrent_cmd"); 
+    }));
+
+    let sender = tx2.clone();
+    action_torrent_reannounce.connect_activate(clone!(@weak torrent_selection_model => move |_action, _| {
+      let mut xs = vec![];
+      let mut i = 0;
+      while let Some(item) = torrent_selection_model.item(i) {
+          if torrent_selection_model.is_selected(i) {
+            let id = item.property_value("id").get::<i64>().expect("id must");
+            xs.push(id);
+          }
+          i += 1;
+      }
+      sender.send(TorrentCmd::Reannounce(xs)).expect("can't send torrent_cmd"); 
+    }));
+
+    let sender = tx2.clone();
+    action_torrent_stop.connect_activate(clone!(@weak torrent_selection_model => move |_action, _| {
+      let mut xs = vec![];
+      let mut i = 0;
+      while let Some(item) = torrent_selection_model.item(i) {
+          if torrent_selection_model.is_selected(i) {
+            let id = item.property_value("id").get::<i64>().expect("id must");
+            xs.push(id);
+          }
+          i += 1;
+      }
+      sender.send(TorrentCmd::Stop(xs)).expect("can't send torrent_cmd"); 
+    }));
+
+    let sender = tx2.clone();
+    action_torrent_verify.connect_activate(clone!(@weak torrent_selection_model => move |_action, _| {
+      let mut xs = vec![];
+      let mut i = 0;
+      while let Some(item) = torrent_selection_model.item(i) {
+          if torrent_selection_model.is_selected(i) {
+            let id = item.property_value("id").get::<i64>().expect("id must");
+            xs.push(id);
+          }
+          i += 1;
+      }
+      sender.send(TorrentCmd::Verify(xs)).expect("can't send torrent_cmd"); 
+    }));
+
     let sender = tx2.clone();
     action_open_folder.connect_activate(clone!(@weak torrent_selection_model => move |_action, _| {
       let selection = torrent_selection_model.selection();
@@ -1290,15 +1467,60 @@ torrent_selection_model.connect_selection_changed(move |_model, _pos, _num_items
       }
       sender.send(TorrentCmd::QueueMoveBottom(xs)).expect("can't send torrent_cmd"); 
     }));
- 
+
+
     let _window = Rc::new(window);
-    action_move_torrent.connect_activate(clone!(@strong _window, @weak torrent_selection_model => move |_action, _| {
+ 
+    let _category_model = Rc::new(category_model);
+    let _category_filter = Rc::new(category_filter);
+    let sender = tx2.clone();
+    add_button.connect_clicked(clone!(@strong _window, @strong _category_model, @strong _category_filter => move |_| {
+            gtk::glib::MainContext::default().spawn_local(add_torrent_file_dialog(Rc::clone(&_window), sender.clone(), Rc::clone(&_category_model), Rc::clone(&_category_filter)));
+    }));
+    let sender = tx2.clone();
+    add_magnet_button.connect_clicked(clone!(@strong _window, @strong _category_model, @strong _category_filter => move |_| {
+            gtk::glib::MainContext::default().spawn_local(add_magnet_dialog(Rc::clone(&_window), sender.clone(), Rc::clone(&_category_model), Rc::clone(&_category_filter)));
+    }));
+    let sender = tx2.clone();
+    action_move_torrent.connect_activate(clone!(@strong _window, @strong _category_filter, @strong _category_model, @weak torrent_selection_model => move |_action, _| {
       let selection = torrent_selection_model.selection();
       let first = selection.minimum();
       if let Some(item) = torrent_selection_model.item(first) {
             let id = item.property_value("id").get::<i64>().expect("id must");
-            gtk::glib::MainContext::default().spawn_local(dialog(Rc::clone(&_window)));
+            gtk::glib::MainContext::default().spawn_local(move_torrent_dialog(Rc::clone(&_window), sender.clone(), id, Rc::clone(&_category_model), Rc::clone(&_category_filter)));
       }
+    }));
+   
+    //let s = "magnet:?xt=urn:btih:8B7CC1C65FFC1C4DD4D94C523694F24D137AA579&tr=http%3A%2F%2Fbt.t-ru.org%2Fann%3Fmagnet&dn=%D0%A7%D0%B5%D1%80%D0%B5%D0%B7%20%D0%BF%D1%80%D0%B8%D1%86%D0%B5%D0%BB%20%2F%20%D0%A1%D0%B5%D1%80%D0%B8%D0%B8%3A%201-4%20%D0%B8%D0%B7%204%20(%D0%A1%D0%B5%D1%80%D0%B3%D0%B5%D0%B9%20%D0%9A%D0%BE%D1%80%D0%BE%D1%82%D0%B0%D0%B5%D0%B2)%20%5B2022%2C%20%D0%B4%D1%80%D0%B0%D0%BC%D0%B0%2C%20%D0%B2%D0%BE%D0%B5%D0%BD%D0%BD%D1%8B%D0%B9%2C%20%D0%B8%D1%81%D1%82%D0%BE%D1%80%D0%B8%D1%8F%2C%20SATRip-AVC%5D";
+    //let s = "magnet:?xt=urn:btih:B7B90236B797D69ADE946413F076010E71BD860A&tr=http%3A%2F%2Fbt3.t-ru.org%2Fann%3Fmagnet&dn=%D0%91%D0%B8%D1%82%D0%B2%D0%B0%20%D0%B2%20%D0%90%D1%80%D0%B4%D0%B5%D0%BD%D0%BD%D0%B0%D1%85%20%2F%20Battle%20of%20the%20Bulge%20(%D0%9A%D0%B5%D0%BD%20%D0%AD%D0%BD%D0%BD%D0%B0%D0%BA%D0%B8%D0%BD%20%2F%20Ken%20Annakin)%20%5B1965%2C%20%D0%A1%D0%A8%D0%90%2C%20%D0%B2%D0%BE%D0%B5%D0%BD%D0%BD%D1%8B%D0%B9%2C%20%D0%B4%D1%80%D0%B0%D0%BC%D0%B0%2C%20BDRip%201080p%5D%20AVO%20(%D0%A0%D1%8F%D0%B1%D0%BE%D0%B2)%20%2B%20Sub%20Eng%20%2B%20Original%20Eng";
+    //gtk::glib::MainContext::default().spawn_local(add_torrent_dialog(Rc::clone(&_window), tx2.clone(), Some(s.to_string()), None, Rc::clone(&_category_model), Rc::clone(&_category_filter)));
+
+    let sender = tx2.clone();
+    action_torrent_remove.connect_activate(clone!(@strong _window, @weak torrent_selection_model => move |_action, _| {
+      let mut xs = vec![];
+      let mut i = 0;
+      while let Some(item) = torrent_selection_model.item(i) {
+          if torrent_selection_model.is_selected(i) {
+            xs.push(item);
+          }
+          i += 1;
+      }
+      gtk::glib::MainContext::default().spawn_local(deletion_confiramtion_dialog(Rc::clone(&_window), sender.clone(), false, xs));
+      //sender.send(TorrentCmd::QueueMoveBottom(xs)).expect("can't send torrent_cmd"); 
+    }));
+
+   let sender = tx2.clone();
+    action_torrent_remove_data.connect_activate(clone!(@strong _window, @weak torrent_selection_model => move |_action, _| {
+      let mut xs = vec![];
+      let mut i = 0;
+      while let Some(item) = torrent_selection_model.item(i) {
+          if torrent_selection_model.is_selected(i) {
+            xs.push(item);
+          }
+          i += 1;
+      }
+      gtk::glib::MainContext::default().spawn_local(deletion_confiramtion_dialog(Rc::clone(&_window), sender.clone(), true, xs));
+      //sender.send(TorrentCmd::QueueMoveBottom(xs)).expect("can't send torrent_cmd"); 
     }));
 
     let click = gtk::GestureClick::new();
@@ -1396,6 +1618,7 @@ torrent_selection_model.connect_selection_changed(move |_model, _pos, _num_items
     _window.present();
 }
 
+
 fn build_bottom_notebook(details_object: &TorrentDetailsObject, peers_model: &gio::ListStore, 
                          tracker_model: &gio::ListStore, file_table: &gtk::ColumnView) -> gtk::Notebook {
     let details_notebook = gtk::Notebook::builder()
@@ -1415,100 +1638,28 @@ fn build_bottom_notebook(details_object: &TorrentDetailsObject, peers_model: &gi
     details_notebook.append_page(&scrolled_window_b, Some(&gtk::Label::new(Some("Trackers"))));
 
     let tier_factory = gtk::SignalListItemFactory::new();
-    tier_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-        label.set_halign(gtk::Align::Start);
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TrackerObject>("tier")
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    tier_factory.connect_setup(label_setup::<TrackerObject, u64, _>("tier", |x| format!("{}", x)));
     
     let announce_factory = gtk::SignalListItemFactory::new();
-    announce_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-        label.set_halign(gtk::Align::Start);
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TrackerObject>("announce")
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    announce_factory.connect_setup(label_setup::<TrackerObject, String, _>("announce", |x| x));
     
     let peers_factory = gtk::SignalListItemFactory::new();
-    peers_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-        label.set_halign(gtk::Align::Start);
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TrackerObject>("last-announce-peer-count")
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    peers_factory.connect_setup(label_setup::<TrackerObject, u64, _>("last-announce-peer-count", |x| format!("{}", x)));
     
     let seeder_factory = gtk::SignalListItemFactory::new();
-    seeder_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-        label.set_halign(gtk::Align::Start);
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TrackerObject>("seeder-count")
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    seeder_factory.connect_setup(label_setup::<TrackerObject, i64, _>("seeder-count", |x| format!("{}", x)));
     
     let leecher_factory = gtk::SignalListItemFactory::new();
-    leecher_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-        label.set_halign(gtk::Align::Start);
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TrackerObject>("leecher-count")
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    leecher_factory.connect_setup(label_setup::<TrackerObject, i64, _>("leecher-count", |x| format!("{}", x)));
     
-    let last_announe_time_factory = gtk::SignalListItemFactory::new();
-    last_announe_time_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-        label.set_halign(gtk::Align::Start);
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TrackerObject>("last-announce-time")
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    let last_announce_time_factory = gtk::SignalListItemFactory::new();
+    last_announce_time_factory.connect_setup(label_setup::<TrackerObject, u64, _>("last-announce-time", format_time));
     
     let last_result_factory = gtk::SignalListItemFactory::new();
-    last_result_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-        label.set_halign(gtk::Align::Start);
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TrackerObject>("last-announce-result")
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    last_result_factory.connect_setup(label_setup::<TrackerObject, String, _>("last-announce-result", |x| x));
     
     let scrape_factory = gtk::SignalListItemFactory::new();
-    scrape_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-        label.set_halign(gtk::Align::Start);
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TrackerObject>("scrape")
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    scrape_factory.connect_setup(label_setup::<TrackerObject, String, _>("scrape", |x| x));
     
     let peers_selection_model = gtk::NoSelection::new(Some(peers_model));
     let peers_table = gtk::ColumnView::new(Some(&peers_selection_model));
@@ -1557,7 +1708,7 @@ fn build_bottom_notebook(details_object: &TorrentDetailsObject, peers_model: &gi
         &gtk::ColumnViewColumn::builder()
           .title("Last Announce")
           .expand(true)
-          .factory(&last_announe_time_factory)
+          .factory(&last_announce_time_factory)
           .build()
         );
 
@@ -1578,44 +1729,15 @@ fn build_bottom_notebook(details_object: &TorrentDetailsObject, peers_model: &gi
         );
 
     let address_factory = gtk::SignalListItemFactory::new();
-    address_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-        label.set_halign(gtk::Align::Start);
-
-        list_item
-            .property_expression("item")
-            .chain_property::<PeerObject>("address")
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    address_factory.connect_setup(label_setup::<PeerObject, String, _>("address", |x| x));
     
     let dl_speed_factory = gtk::SignalListItemFactory::new(); // TODO: generalize
-    dl_speed_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-
-        list_item
-            .property_expression("item")
-            .chain_property::<PeerObject>("rate-to-client")
-            .chain_closure::<String>(gtk::glib::closure!(|_: Option<gtk::glib::Object>, i: u64| {
-                utils::format_download_speed(i.try_into().unwrap())
-            }))
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    dl_speed_factory.connect_setup(label_setup::<PeerObject, u64, _>("rate-to-client", |i|  utils::format_download_speed(i.try_into().unwrap())));
+    
 
     let ul_speed_factory = gtk::SignalListItemFactory::new(); // TODO: generalize
-    ul_speed_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-
-        list_item
-            .property_expression("item")
-            .chain_property::<PeerObject>("rate-to-peer")
-            .chain_closure::<String>(gtk::glib::closure!(|_: Option<gtk::glib::Object>, i: u64| {
-                utils::format_download_speed(i.try_into().unwrap())
-            }))
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    ul_speed_factory.connect_setup(label_setup::<PeerObject, u64, _>("rate-to-peer", |i|  utils::format_download_speed(i.try_into().unwrap())));
+                
 
     let progress_factory = gtk::SignalListItemFactory::new();
     progress_factory.connect_setup(move |_, list_item| {
@@ -1629,30 +1751,14 @@ fn build_bottom_notebook(details_object: &TorrentDetailsObject, peers_model: &gi
         
         progress.set_show_text(true);
     });
+
     
     let flags_factory = gtk::SignalListItemFactory::new();
-    flags_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-        label.set_halign(gtk::Align::Start);
-
-        list_item
-            .property_expression("item")
-            .chain_property::<PeerObject>("flag-str")
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
+    flags_factory.connect_setup(label_setup::<PeerObject, String, _>("flag-str", |x| x));
 
     let client_factory = gtk::SignalListItemFactory::new();
-    client_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-        label.set_halign(gtk::Align::Start);
+    client_factory.connect_setup(label_setup::<PeerObject, String, _>("client-name", |x| x));
 
-        list_item
-            .property_expression("item")
-            .chain_property::<PeerObject>("client-name")
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
     let address_col = gtk::ColumnViewColumn::new(Some("Address"), Some(&address_factory));
     let dl_speed_col = gtk::ColumnViewColumn::new(Some("Down Speed"), Some(&dl_speed_factory));
     let up_speed_col = gtk::ColumnViewColumn::new(Some("Up Speed"), Some(&ul_speed_factory));
@@ -1683,7 +1789,7 @@ fn build_bottom_notebook(details_object: &TorrentDetailsObject, peers_model: &gi
         .build();
 
     details_notebook.append_page(&scrolled_window, Some(&gtk::Label::new(Some("Peers"))));
-    let files_page = build_bottom_files(file_table);
+    let files_page = build_bottom_files(file_table, true);
     details_notebook.append_page(&files_page, Some(&gtk::Label::new(Some("Files"))));
     //details_notebook.set_current_page(Some(3));
    
@@ -1747,7 +1853,7 @@ fn create_file_model(tree: &Rc<RefCell<Vec<utils::Node>>>)  ->  gtk::TreeListMod
 
 
 
-fn build_bottom_files(file_table: &gtk::ColumnView) -> gtk::ScrolledWindow {
+fn build_bottom_files(file_table: &gtk::ColumnView, include_progress: bool) -> gtk::ScrolledWindow {
 
     // TODO: realize consequences of your findings...
     let exp_factory = gtk::SignalListItemFactory::new();
@@ -1829,6 +1935,7 @@ fn build_bottom_files(file_table: &gtk::ColumnView) -> gtk::ScrolledWindow {
           .build()
         );
 
+    if include_progress {
     let progress_factory = gtk::SignalListItemFactory::new();
     progress_factory.connect_setup(move |_, list_item| {
         let progress = gtk::ProgressBar::new();
@@ -1842,7 +1949,7 @@ fn build_bottom_files(file_table: &gtk::ColumnView) -> gtk::ScrolledWindow {
         
         progress.set_show_text(true);
     });
-    
+     
     file_table.append_column(
         &gtk::ColumnViewColumn::builder()
           .title("Progress")
@@ -1850,6 +1957,7 @@ fn build_bottom_files(file_table: &gtk::ColumnView) -> gtk::ScrolledWindow {
           .factory(&progress_factory)
           .build()
         );
+    }
 
     let download_factory = gtk::SignalListItemFactory::new();
     download_factory.connect_setup(move |_, list_item| {
@@ -1909,21 +2017,339 @@ fn build_bottom_files(file_table: &gtk::ColumnView) -> gtk::ScrolledWindow {
 }
 
 
-async fn dialog<W: IsA<gtk::Window>>(window: Rc<W>) {
+async fn move_torrent_dialog<W: IsA<gtk::Window>>(window: Rc<W>, sender: mpsc::Sender<TorrentCmd>, id: i64, category_model:Rc<gio::ListStore>, filter:Rc<gtk::CustomFilter>) {
+    let model = gtk::StringList::new(&vec![]);
+    let mut i = 0;
+    while let Some(x) = category_model.item(i) {
+//        let name = x.property_value("download-dir").get::<String>().expect("skdfj1");
+        let folder = x.property_value("download-dir").get::<String>().expect("skdfj1");
+        let is_folder = x.property_value("is-folder").get::<bool>().expect("skdfj1");
+        if is_folder {
+            model.append(folder.as_str());
+        } 
+        i +=1 ;
+    }
+  let dialog = gtk::Dialog::builder()
+        .transient_for(&*window)
+        .modal(true)
+        .build();
+
+  dialog.set_css_classes(&["simple-dialog"]);
+  dialog.add_button("Cancel", gtk::ResponseType::Cancel);
+  dialog.add_button("Move", gtk::ResponseType::Ok);
+
+  // TODO: add custom widget for dropdown, so user can enter custom path, maybe directory picker?
+  let destination = gtk::DropDown::builder()
+      .model(&model)
+      .build();
+  let move_checkbox = gtk::CheckButton::builder().active(true).label("Move the data").tooltip_text("if true, move from previous location. otherwise, search 'location' for files").build(); 
+  let vbox = gtk::Box::new(gtk::Orientation::Vertical, 8);
+  vbox.append(&destination);
+  vbox.append(&move_checkbox);
+  dialog.content_area().append(&vbox); // and a label for destination))
+  let response = dialog.run_future().await;
+  dialog.close();
+  if response == gtk::ResponseType::Ok {
+     if let Some(o) = destination.selected_item() {
+        let is_move = move_checkbox.is_active();
+        let folder = o.property_value("string").get::<String>().expect("should be string"); 
+        sender.send(TorrentCmd::Move(vec![id], folder, is_move)).expect("failure snd move");
+
+        task::sleep(std::time::Duration::from_millis(3000)).await;
+        filter.changed(gtk::FilterChange::MoreStrict); // now only need to schedule this call
+     }
+  } 
+}
+
+async fn deletion_confiramtion_dialog<W: IsA<gtk::Window>>(window: Rc<W>, sender: mpsc::Sender<TorrentCmd>, with_data: bool, items: Vec<glib::Object>) {
+     let msg = if items.len() == 1 {
+        let foo = if with_data { "with all local data?"} else { "?" }; 
+        let name = items[0].property_value("name").get::<String>().expect("name must");
+        format!("Do you want to delete '{}' {}", name, foo)
+     } else {
+        let foo = if with_data { "torrents and all their data?"} else { "torrents?" }; 
+        format!("Do you want to delete {} {}", items.len(), foo)
+     };
+     let dialog = gtk::MessageDialog::builder()
+        .transient_for(&*window)
+        .modal(true)
+        .buttons(gtk::ButtonsType::OkCancel)
+        .text(&msg)
+//        .use_markup(true)
+        .build();
+  dialog.set_css_classes(&["simple-dialog"]);
+
+  let response = dialog.run_future().await;
+  dialog.close();
+
+  if response == gtk::ResponseType::Ok {
+      let ids = items.iter().map(|x| x.property_value("id").get::<i64>().expect("id must")).collect();
+      sender.send(TorrentCmd::Delete(ids, with_data)).expect("can't snd rm");
+  }
+}
+
+async fn add_torrent_file_dialog<W: IsA<gtk::Window>>(_window: Rc<W> , sender: mpsc::Sender<TorrentCmd>, category_model:Rc<gio::ListStore>, filter:Rc<gtk::CustomFilter>) {
+    let dialog = gtk::FileChooserDialog::new(
+        Some("Select .torrent file"), Some(&*_window), gtk::FileChooserAction::Open, &[("Open", gtk::ResponseType::Ok), ("Cancel", gtk::ResponseType::Cancel)]);
+    let torrent_file_filter = gtk::FileFilter::new();
+    torrent_file_filter.add_suffix("torrent");
+    dialog.add_filter(&torrent_file_filter);
+    let response = dialog.run_future().await;
+    dialog.close();
+    if response == gtk::ResponseType::Ok {
+        if let Some(file) = dialog.file() {
+            if let Some(path) = file.path() {
+                gtk::glib::MainContext::default().spawn_local(add_torrent_dialog(Rc::clone(&_window), sender, None, Some(path), category_model, filter));
+            }
+        }
+    }
+}
+
+async fn add_magnet_dialog<W: IsA<gtk::Window>>(_window: Rc<W> , sender: mpsc::Sender<TorrentCmd>, category_model:Rc<gio::ListStore>, filter:Rc<gtk::CustomFilter>) {
+  let dialog = gtk::Dialog::builder()
+        .transient_for(&*_window)
+        .modal(true)
+        .build();
+
+  dialog.add_button("Cancel", gtk::ResponseType::Cancel);
+  dialog.add_button("Add", gtk::ResponseType::Ok);
+
+    let hbox = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    let l = gtk::Label::new(Some("Magnet link: "));
+    hbox.append(&l);
+    let text = gtk::Text::new();
+    hbox.append(&text);
+    dialog.content_area().append(&hbox); 
+    dialog.set_css_classes(&["simple-dialog"]);
+
+    let clipboard = gtk::gdk::Display::default().expect("surely we must have display").primary_clipboard();
+    let res =  clipboard.read_text_future().await;
+    if let Result::Ok(maybe_text) = res { 
+      if let Some(gstring) = maybe_text {
+        let s = gstring.to_string();
+        if s.starts_with("magnet:") {
+          text.set_text(&s);
+        }
+      }
+    } else {
+        println!("can't read text clipboard content");
+    }
+    let response = dialog.run_future().await;
+    dialog.close();
+    if response == gtk::ResponseType::Ok {
+        let s = text.text().to_string();
+        if s.starts_with("magnet:") {
+                gtk::glib::MainContext::default().spawn_local(add_torrent_dialog(Rc::clone(&_window), sender, Some(s), None, category_model, filter));
+        }
+    }
+}
+
+
+async fn add_torrent_dialog<W: IsA<gtk::Window>>(window: Rc<W>, sender: mpsc::Sender<TorrentCmd>, magnet_url: Option<String>, torrent_file:Option<PathBuf>, category_model:Rc<gio::ListStore>, filter:Rc<gtk::CustomFilter>) {
+   use lava_torrent::torrent::v1::Torrent;
+
+//  task::sleep(std::time::Duration::from_millis(2000)).await;
+    let model = gtk::StringList::new(&vec![]);
+    let mut i = 0;
+    while let Some(x) = category_model.item(i) {
+//        let name = x.property_value("download-dir").get::<String>().expect("skdfj1");
+        let folder = x.property_value("download-dir").get::<String>().expect("skdfj1");
+        let is_folder = x.property_value("is-folder").get::<bool>().expect("skdfj1");
+        if is_folder {
+            model.append(folder.as_str());
+        } 
+        i +=1 ;
+    }
+
+  let vbox = gtk::Box::new(gtk::Orientation::Vertical, 4);
+
+  let file_hbox = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+  vbox.append(&file_hbox);
+
+  let l = gtk::Label::new(Some("Torrent file"));
+  file_hbox.append(&l);
+
+  let _cancel_fetch = Rc::new(Cell::new(false));
+  let _magnet_done = Rc::new(Cell::new(false));
+  let file_chooser = gtk::Button::new();
+  file_hbox.append(&file_chooser);
+
   let dialog = gtk::Dialog::builder()
         .transient_for(&*window)
         .modal(true)
         .build();
 
   dialog.add_button("Cancel", gtk::ResponseType::Cancel);
-  dialog.add_button("Move", gtk::ResponseType::Ok);
+  dialog.add_button("Add", gtk::ResponseType::Ok);
 
-  // TODO: add custom widget for dropdown, so user can enter custom path, maybe directory picker?
-  let destination = gtk::DropDown::builder()
-      .build();
+  let hbox = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+  let l = gtk::Label::new(Some("Destination"));
+  hbox.append(&l);
+  let destination = gtk::DropDown::builder().model(&model).build();
+  hbox.append(&destination);
+  vbox.append(&hbox);
+
+  let file_table = gtk::ColumnView::new(None::<&gtk::NoSelection>);
+  let scrolled_files = build_bottom_files(&file_table, false);
+
+
+ // let stupid_model = create_file_model(&Rc::new(RefCell::new(utils::build_tree(&files))));
+  let stupid_model = create_file_model(&Rc::new(RefCell::new(utils::build_tree(&vec![]))));
+  let files_selection = gtk::NoSelection::new(Some(&stupid_model));
+  file_table.set_model(Some(&files_selection));
+
+
+  if let Some(ref path_buf) = torrent_file {
+     let pb2 = path_buf.clone();
+     let path = pb2.into_boxed_path();
+     let s = path.to_str().unwrap();
+     let torrent = Torrent::read_from_file(path.clone()).unwrap();
+     let files = torrent.files.unwrap().iter().map(|f| transmission::File {name: f.path.as_path().to_str().unwrap().to_string(), length: f.length as u64, bytes_completed: 0  } ).collect();
+     let stupid_model = create_file_model(&Rc::new(RefCell::new(utils::build_tree(&files))));
+     let files_selection = gtk::NoSelection::new(Some(&stupid_model));
+     file_table.set_model(Some(&files_selection));
+     file_chooser.set_label(&s);
+  }
+  let magnet_data =  Rc::new(RefCell::new(None));
+  let progressbar = gtk::ProgressBar::new();
+  let _progressbar = Rc::new(progressbar);
+  if let Some(ref magnet) = magnet_url {
+      let foo : String = magnet.chars().into_iter().take(60).collect();
+      let _file_table = Rc::new(file_table);
+      if let Result::Ok(m) = Magnet::new(magnet) { 
+          let s = m.dn.as_ref().map(|l| urlencoding::decode(l).expect("UTF-8").into_owned());
+//        println!("{}", m.dn.expect("foo"));
+        file_chooser.set_label(&s.unwrap_or(foo));
+        gtk::glib::MainContext::default().spawn_local(pulse_progress(Rc::clone(&_progressbar), Rc::clone(&_magnet_done)));
+        gtk::glib::MainContext::default().spawn_local(fetch_magnet_link(magnet.to_string(), Rc::clone(&_file_table), Rc::clone(&_cancel_fetch), Rc::clone(&_magnet_done), Rc::clone(&magnet_data)));
+      } else {
+         // FIXME: report error on wrong magnets..
+      }
+  }
+
+  scrolled_files.set_min_content_width(580);
+  scrolled_files.set_min_content_height(320);
+  vbox.append(&scrolled_files);
+  vbox.append(&*_progressbar);
+
   
-  dialog.content_area().append(&destination); // and a label for destination))
+
+  let hbox = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+ // let l = gtk::Label::new(Some("Torrent priority"));
+ // hbox.append(&l);
+//  let priority = gtk::DropDown::builder().build();
+//  hbox.append(&priority);
+  vbox.append(&hbox);
+
+  let start_paused_checkbox = gtk::CheckButton::builder().active(false).label("Start paused").build(); 
+  vbox.append(&start_paused_checkbox);
+  let delete_torrent_file = gtk::CheckButton::builder().active(true).label("Delete torrent file").build(); 
+  vbox.append(&delete_torrent_file);
+  delete_torrent_file.set_sensitive(false);
+
+  dialog.content_area().append(&vbox); // and a label for destination))
+  dialog.set_css_classes(&["simple-dialog"]);
   let response = dialog.run_future().await;
   dialog.close();
+  _cancel_fetch.set(true);
+  _magnet_done.set(true);
+  if response == gtk::ResponseType::Ok {
+       let start_paused =start_paused_checkbox.is_active();
+       let folder = destination.selected_item().map(|x| x.property_value("string").get::<String>().expect("should be string")); 
+       if let Some(path_buf) = torrent_file {
+         let buf = std::fs::read(path_buf).expect("file invalid");
+         let metainfo = base64::encode(buf);
+         sender.send(TorrentCmd::AddTorrent(folder, None, Some(metainfo), start_paused)).expect("failure snd move");
+       } else if let Some(data) = &*magnet_data.borrow() {
+         let metainfo = base64::encode(data);
+         sender.send(TorrentCmd::AddTorrent(folder, None, Some(metainfo), start_paused)).expect("failure snd move");
+       } else if let Some(url) = magnet_url {
+         sender.send(TorrentCmd::AddTorrent(folder, Some(url.to_string()), None, start_paused)).expect("failure snd move");
+       } else {
+           println!("Error adding torrent. No magnet link and no torrent file is specified");
+       }
+
+        task::sleep(std::time::Duration::from_millis(3000)).await;
+        filter.changed(gtk::FilterChange::LessStrict); // unnecesserry as we adding the torrent  
+    
+  } 
 }
 
+async fn pulse_progress(_progressbar: Rc<gtk::ProgressBar>, _magnet_done: Rc<Cell<bool>>) {
+    loop {
+        if _magnet_done.get() {
+            break;
+        }
+        _progressbar.pulse();
+       task::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    _progressbar.set_fraction(1.0);
+}
+
+async fn fetch_magnet_link(uri: String, _file_table: Rc<gtk::ColumnView>, cancellation: Rc<Cell<bool>>, done: Rc<Cell<bool>>, magnet_data: Rc<RefCell<Option<Vec<u8>>>>) {
+    use lava_torrent::torrent::v1::Torrent;
+    let maybe_torrent = magnet_to_metainfo(&uri, cancellation).await; 
+    done.set(true);
+    if let Some(ref data) = maybe_torrent {
+      let res = Torrent::read_from_bytes(data);
+      if let Result::Ok(torrent) = res {
+        if let Some(xs) = torrent.files { 
+          let files = xs.iter().map(|f| transmission::File {name: f.path.as_path().to_str().expect("bloody name?").to_string(), length: f.length as u64, bytes_completed: 0  } ).collect();
+          let stupid_model = create_file_model(&Rc::new(RefCell::new(utils::build_tree(&files))));
+          let files_selection = gtk::NoSelection::new(Some(&stupid_model));
+          _file_table.set_model(Some(&files_selection));
+          (*magnet_data).replace(Some(data.to_vec()));
+        } else {
+            // the file is the name 
+            // TODO: same needs to be done for file details
+          let files =  vec![transmission::File {name: torrent.name, length: torrent.length as u64, bytes_completed: 0  }];
+          let stupid_model = create_file_model(&Rc::new(RefCell::new(utils::build_tree(&files))));
+          let files_selection = gtk::NoSelection::new(Some(&stupid_model));
+          _file_table.set_model(Some(&files_selection));
+          _file_table.set_sensitive(false);
+          (*magnet_data).replace(Some(data.to_vec()));
+        }
+      } else {
+          println!("Error: {:?}", res); // FIXME: error mngmnt
+      }
+    }
+}
+
+// now, this is not really necessary, as we have NumericSorter and StringSorter.Except, how to
+// reverse those fucking sorters?
+fn sort_by_property<'a, T>(property_name: &'static str, desc: bool) -> gtk::CustomSorter  
+  where  T:for<'b> glib::value::FromValue<'b>  + std::cmp::PartialOrd {
+    gtk::CustomSorter::new(move |x,y|{
+        if desc == (x.property_value(property_name).get::<T>().expect("ad") > y.property_value(property_name).get::<T>().expect("ad")) {
+            gtk::Ordering::Smaller
+        } else if desc == (x.property_value(property_name).get::<T>().expect("ad") < y.property_value(property_name).get::<T>().expect("ad")) {
+            gtk::Ordering::Larger
+        } else {
+            gtk::Ordering::Equal
+        }
+    })
+}
+
+// maybe somehow drop Arc, as we are only going to use it from the main thread.
+// On the other hand it locks once per setup call, which means not much (i hope)
+fn label_setup<T, R, F>(property_name: &'static str, f: F) -> impl Fn(&gtk::SignalListItemFactory, &gtk::ListItem) -> () 
+      where T: IsA<glib::Object>, 
+            R: for<'b> gtk::glib::value::FromValue<'b>,
+            F: Fn(R) -> String + std::marker::Send + std::marker::Sync + 'static {
+      let f1 = std::sync::Arc::new(f);
+      move |_, list_item| {
+        let label = gtk::Label::new(None);
+        list_item.set_child(Some(&label));
+        label.set_halign(gtk::Align::Start);
+
+        let g = std::sync::Arc::clone(&f1);
+        
+        list_item
+            .property_expression("item")
+            .chain_property::<T>(property_name)
+            .chain_closure::<String>(gtk::glib::closure!(move |_: Option<gtk::glib::Object>, x: R| {
+                g(x)
+            }))
+            .bind(&label, "label", gtk::Widget::NONE);
+      }
+}

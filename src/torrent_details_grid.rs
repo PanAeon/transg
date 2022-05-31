@@ -25,6 +25,7 @@ use crate::objects::TorrentDetailsObject;
 use glib::{ParamFlags, ParamSpec, ParamSpecObject, Value};
 use once_cell::sync::Lazy;
 use crate::utils::{format_download_speed, format_size, format_eta};
+use crate::utils::format_time;
 
     #[derive(CompositeTemplate, Default)]
     #[template(resource = "/org/transgression/torrent_detail.ui")]
@@ -68,6 +69,8 @@ use crate::utils::{format_download_speed, format_size, format_eta};
       pub corrupted: TemplateChild<Label>,
       #[template_child]
       pub completed_at: TemplateChild<Label>,
+      #[template_child]
+      pub error: TemplateChild<Label>,
   }
 
   #[glib::object_subclass]
@@ -104,7 +107,11 @@ impl ObjectImpl for TorrentDetailsGrid {
                 "details" =>   { 
                     let details = value.get::<TorrentDetailsObject>().expect("Expect torrent details");
                     details.property_expression("name").bind(&self.name.get(), "label", gtk::Widget::NONE);// TODO: what to do on unbind?
-                    details.property_expression("done-date").bind(&self.completed_at.get(), "label", gtk::Widget::NONE);
+                    details.property_expression("done-date")
+                         .chain_closure::<String>(gtk::glib::closure!(|_: Option<gtk::glib::Object>, i: u64| {
+                               format_time(i) 
+                          }))
+                        .bind(&self.completed_at.get(), "label", gtk::Widget::NONE);
                     details.property_expression("corrupt-ever").bind(&self.corrupted.get(), "label", gtk::Widget::NONE);
                     details.property_expression("uploaded-ever")
                            .chain_closure::<String>(gtk::glib::closure!(|_: Option<gtk::glib::Object>, i: u64| {
@@ -165,6 +172,9 @@ impl ObjectImpl for TorrentDetailsGrid {
     
     details.property_expression("hash-string")
        .bind(&self.hash.get(), "label", gtk::Widget::NONE);
+
+    details.property_expression("error-string")
+       .bind(&self.error.get(), "label", gtk::Widget::NONE);
 
     
     details.property_expression("rate-download")

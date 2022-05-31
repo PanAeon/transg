@@ -20,24 +20,23 @@
     <section>
       <item>
         <attribute name="icon">media-playback-start-symbolic</attribute>
-        <attribute name="verb-icon-name">system-run-symbolic</attribute>
-        <attribute name="label" translatable="yes">_Resume</attribute>
-        <attribute name="action">app.preferences</attribute>
+        <attribute name="label" translatable="yes">_Start</attribute>
+        <attribute name="action">win.torrent-start</attribute>
+      </item>
+      <item>
+        <attribute name="icon">media-playback-ff-symbolic</attribute>
+        <attribute name="label" translatable="yes">_Start Now</attribute>
+        <attribute name="action">win.torrent-start-now</attribute>
       </item>
       <item>
         <attribute name="verb-icon">media-playback-stop</attribute>
         <attribute name="label" translatable="yes">_Pause</attribute>
-        <attribute name="action">app.preferences</attribute>
-      </item>
-      <item>
-        <attribute name="icon">/org/gtk/libgtk/icons/32x32/devices/drive-harddisk.png</attribute>
-        <attribute name="label" translatable="yes">_Remove</attribute>
-        <attribute name="action">app.preferences</attribute>
+        <attribute name="action">win.torrent-stop</attribute>
       </item>
       <item>
         <attribute name="icon-name">preferences-desktop-locale-symbolic</attribute>
         <attribute name="label" translatable="yes">_Verify</attribute>
-        <attribute name="action">app.preferences</attribute>
+        <attribute name="action">win.torrent-verify</attribute>
       </item>
       <item>
         <attribute name="label" translatable="yes">_Move</attribute>
@@ -45,15 +44,20 @@
       </item>
       <item>
         <attribute name="label" translatable="yes">_Copy magnet link</attribute>
-        <attribute name="action">app.preferences</attribute>
+        <attribute name="action">win.copy-magnet-link</attribute>
+      </item>
+      <item>
+        <attribute name="icon">media-playback-upload-symbolic</attribute>
+        <attribute name="label" translatable="yes">_Reannounce</attribute>
+        <attribute name="action">win.torrent-reannounce</attribute>
       </item>
       <item>
         <attribute name="label" translatable="yes">_Remove</attribute>
-        <attribute name="action">app.preferences</attribute>
+        <attribute name="action">win.torrent-remove</attribute>
       </item>
       <item>
         <attribute name="label" translatable="yes">_Remove with data</attribute>
-        <attribute name="action">app.preferences</attribute>
+        <attribute name="action">win.torrent-remove-with-data</attribute>
       </item>
     </section>
     <section>

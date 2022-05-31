@@ -47,11 +47,34 @@
       </object>
     </child>
     <child>
+      <object class="GtkLabel">
+        <property name="halign">start</property>
+        <property name="label" translatable="yes">Error:</property>
+        <style>
+          <class name="details-label"/>
+        </style>
+        <layout>
+          <property name="column">0</property>
+          <property name="row">9</property>
+        </layout>
+      </object>
+    </child>
+    <child>
       <object class="GtkLabel" id="hash">
         <property name="halign">start</property>
         <layout>
           <property name="column">1</property>
           <property name="row">8</property>
+          <property name="column-span">5</property>
+        </layout>
+      </object>
+    </child>
+    <child>
+      <object class="GtkLabel" id="error">
+        <property name="halign">start</property>
+        <layout>
+          <property name="column">1</property>
+          <property name="row">9</property>
           <property name="column-span">5</property>
         </layout>
       </object>

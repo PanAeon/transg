@@ -1,5 +1,6 @@
 //use std::fmt;
 use transg::transmission;
+use chrono::{UTC, NaiveDateTime, DateTime};
 
 #[derive(Debug, Clone)]
 pub struct Node {
@@ -10,15 +11,22 @@ pub struct Node {
     pub children: Vec<Node>
 }
 
+const BYTES_TB: i64 = 1024*1024*1024*1024; 
+const BYTES_GB: i64 = 1024*1024*1024; 
+const BYTES_MB: i64 = 1024*1024; 
+const F_BYTES_TB: f64 = 1024.0*1024.0*1024.0*1024.0; 
+const F_BYTES_GB: f64 = 1024.0*1024.0*1024.0; 
+const F_BYTES_MB: f64 = 1024.0*1024.0; 
+
 pub fn format_size(i: i64) -> String {
                 if i == 0 {
                   "".to_string()
-                } else if i > 1024*1024*1024*1024 {
-                  format!("{:.2} Tib", i as f64 / (1024.0 * 1024.0 * 1024.0 * 1024.0))
-                } else if i > 1024*1024*1024 {
-                  format!("{:.2} Gib", i as f64 / (1024.0 * 1024.0 * 1024.0))
-                } else if i > 1024*1024 {
-                  format!("{:.2} Mib", i as f64 / (1024.0 * 1024.0))
+                } else if i > BYTES_TB {
+                  format!("{:.2} Tib", i as f64 / F_BYTES_TB )
+                } else if i > BYTES_GB {
+                  format!("{:.2} Gib", i as f64 / F_BYTES_GB)
+                } else if i > BYTES_MB {
+                  format!("{:.2} Mib", i as f64 / F_BYTES_MB)
                 } else {
                   format!("{:.2} Kib", i as f64 / 1024.0)
                 }
@@ -26,11 +34,17 @@ pub fn format_size(i: i64) -> String {
 pub fn format_download_speed(i: i64) -> String { 
                 if i == 0 {
                   "".to_string()
-                } else if i > 1024*1024 {
-                  format!("{} Mb/s", i / (1024 * 1024))
+                } else if i > BYTES_MB {
+                  format!("{:.2} Mib/s", i as f64 / F_BYTES_MB)
                 } else {
-                  format!("{} Kb/s", i / 1024)
+                  format!("{:.2} Kib/s", i as f64 / 1024.0)
                 }
+}
+
+pub fn format_time(i: u64) -> String {
+  let naive = NaiveDateTime::from_timestamp(i.try_into().expect("can't convert from u64 into i64"), 0);
+  let datetime: DateTime<UTC> = DateTime::from_utc(naive, UTC);
+  datetime.format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 pub fn format_eta(secs: i64) -> String {
