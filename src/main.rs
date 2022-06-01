@@ -5,14 +5,13 @@ mod magnet_tools;
 mod notification_utils;
 mod command_processor;
 mod torrent_stats;
+mod file_table;
+mod create_torrent_dialog;
 use crate::objects::{ TorrentInfo, TorrentDetailsObject, Stats, PeerObject, TrackerObject, FileObject, CategoryObject};
 use crate::torrent_details_grid::TorrentDetailsGrid;
-use gtk::TreeListRow;
 use transg::transmission;
-use magnet_tools::magnet_to_metainfo;
-use base64;
-use magnet_url::Magnet;
-use urlencoding;
+use crate::file_table::{create_file_model, build_bottom_files};
+use crate::create_torrent_dialog::add_torrent_dialog;
  
 use gtk::prelude::*;
 use gtk::Application;
@@ -20,14 +19,11 @@ use glib::clone;
 use gtk::glib;
 use gtk::gio;
 use utils::{update_torrent_details, format_time, json_value_to_torrent_info};
-use std::future::Future;
 //use std::sync::{Arc, Mutex};
-use std::path::PathBuf;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 //use std::sync::mpsc::{Sender, Receiver};
 use tokio::sync::mpsc;
-use async_std::task;
 use command_processor::{TorrentCmd, TorrentUpdate, CommandProcessor};
 use crate::torrent_stats::update_torrent_stats;
 
@@ -981,12 +977,12 @@ torrent_selection_model.connect_selection_changed(move |_model, _pos, _num_items
     let _category_model = Rc::new(category_model);
     let _category_filter = Rc::new(category_filter);
     let sender = tx2.clone();
-    add_button.connect_clicked(clone!(@strong _window, @strong _category_model, @strong _category_filter => move |_| {
-            gtk::glib::MainContext::default().spawn_local(add_torrent_file_dialog(Rc::clone(&_window), sender.clone(), Rc::clone(&_category_model), Rc::clone(&_category_filter)));
+    add_button.connect_clicked(clone!(@strong _window, @strong _category_filter => move |_| {
+            gtk::glib::MainContext::default().spawn_local(add_torrent_file_dialog(Rc::clone(&_window), sender.clone(), Rc::clone(&_category_filter)));
     }));
     let sender = tx2.clone();
-    add_magnet_button.connect_clicked(clone!(@strong _window, @strong _category_model, @strong _category_filter => move |_| {
-            gtk::glib::MainContext::default().spawn_local(add_magnet_dialog(Rc::clone(&_window), sender.clone(), Rc::clone(&_category_model), Rc::clone(&_category_filter)));
+    add_magnet_button.connect_clicked(clone!(@strong _window, @strong _category_filter => move |_| {
+            gtk::glib::MainContext::default().spawn_local(add_magnet_dialog(Rc::clone(&_window), sender.clone(), Rc::clone(&_category_filter)));
     }));
     let sender = tx2.clone();
     action_move_torrent.connect_activate(clone!(@strong _window, @strong _category_filter, @strong _category_model, @weak torrent_selection_model => move |_action, _| {
@@ -1280,200 +1276,10 @@ fn build_bottom_notebook(details_object: &TorrentDetailsObject, peers_model: &gi
 }
 
 
-fn get_children(tree: &Vec<utils::Node>, path: String) -> Vec<utils::Node> {
-  fn do_get_children(tree: &Vec<utils::Node>, mut path: Vec<&str>) -> Vec<utils::Node> {
-  for n in tree {
-    if n.name == path[0] {
-        if path.len() == 1 {
-            return n.children.clone();
-        } else {
-            path.remove(0);
-            return do_get_children(&n.children, path);
-        }
-    }
-  }
-  vec![]
-  }
-  do_get_children(tree, path.split('/').collect())
-}
 
 //static file_tree_ref : RefCell<Vec<utils::Node>> = RefCell::new(None);
 
-fn create_file_model(tree: &Rc<RefCell<Vec<utils::Node>>>)  ->  gtk::TreeListModel 
-  {
 
-    let m0 = gio::ListStore::new(FileObject::static_type());
-    let mut v0 : Vec<FileObject> = vec![];
-    for node in tree.borrow().iter() { 
-          let fraction: f64 = if node.size == 0 { 0.0 } else { node.downloaded as f64 / node.size as f64 };
-          v0.push(FileObject::new(&node.name.clone(), &node.path.clone(), &node.size.clone(), &fraction, true, 3)); 
-    }
-    m0.splice(0, 0, &v0);
-
-    let tree = tree.clone(); // TODO: probably no need, just use clone! with strong reference..
-
-    let tree_fun =  move |x:&glib::Object|{
-          let path = x.property_value("path").get::<String>().unwrap();
-          let children = get_children(&tree.borrow(), path);
-          if children.len() > 0 {
-            let m0 = gio::ListStore::new(FileObject::static_type());
-            let mut v0 : Vec<FileObject> = vec![];
-            for node in &children { 
-              let fraction: f64 = if node.size == 0 { 0.0 } else { node.downloaded as f64 / node.size as f64 };
-              v0.push(FileObject::new(&node.name.clone(), &node.path.clone(), &node.size.clone(), &fraction, true, 3)); 
-            }
-            m0.splice(0, 0, &v0);
-            Some(m0.upcast())
-          } else {
-              None
-          }
-        };
-
-    let model = gtk::TreeListModel::new(&m0, false, true, tree_fun);
-    
-    model
-}
-
-
-
-fn build_bottom_files(file_table: &gtk::ColumnView, include_progress: bool) -> gtk::ScrolledWindow {
-
-    // TODO: realize consequences of your findings...
-    let exp_factory = gtk::SignalListItemFactory::new();
-    exp_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        label.set_halign(gtk::Align::Start);
-         
-        let expander = gtk::TreeExpander::new();
-        list_item.set_child(Some(&expander));
-        
-        expander.set_child(Some(&label));
-        
-        list_item
-            .property_expression("item")
-            .bind(&expander, "list-row", gtk::Widget::NONE);
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TreeListRow>("item")
-            .chain_property::<FileObject>("name")
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
-    
-    file_table.append_column(
-        &gtk::ColumnViewColumn::builder()
-          .title("Name")
-          .expand(true)
-          .factory(&exp_factory)
-          .build()
-        );
-    
-
-    let size_factory = gtk::SignalListItemFactory::new();
-    size_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        label.set_halign(gtk::Align::Start);
-
-        list_item.set_child(Some(&label));
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TreeListRow>("item")
-            .chain_property::<FileObject>("size")
-            .chain_closure::<String>(gtk::glib::closure!(|_: Option<gtk::glib::Object>, i: u64| {
-                utils::format_size(i.try_into().unwrap())
-            }))
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
-    
-    file_table.append_column(
-        &gtk::ColumnViewColumn::builder()
-          .title("Size")
-          .expand(true)
-          .factory(&size_factory)
-          .build()
-        );
-
-    if include_progress {
-    let progress_factory = gtk::SignalListItemFactory::new();
-    progress_factory.connect_setup(move |_, list_item| {
-        let progress = gtk::ProgressBar::new();
-        list_item.set_child(Some(&progress));
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TreeListRow>("item")
-            .chain_property::<FileObject>("progress")
-            .bind(&progress, "fraction", gtk::Widget::NONE);
-        
-        progress.set_show_text(true);
-    });
-     
-    file_table.append_column(
-        &gtk::ColumnViewColumn::builder()
-          .title("Progress")
-          .expand(true)
-          .factory(&progress_factory)
-          .build()
-        );
-    }
-
-    let download_factory = gtk::SignalListItemFactory::new();
-    download_factory.connect_setup(move |_, list_item| {
-        let checkbox = gtk::CheckButton::new();
-        list_item.set_child(Some(&checkbox));
-        checkbox.set_halign(gtk::Align::Start);
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TreeListRow>("item")
-            .chain_property::<FileObject>("download")
-            .bind(&checkbox, "active", gtk::Widget::NONE);
-    });
-    
-    file_table.append_column(
-        &gtk::ColumnViewColumn::builder()
-          .title("Download")
-          .expand(true)
-          .factory(&download_factory)
-          .build()
-        );
-
-    let priority_factory = gtk::SignalListItemFactory::new();
-    priority_factory.connect_setup(move |_, list_item| {
-        let label = gtk::Label::new(None);
-        list_item.set_child(Some(&label));
-        label.set_halign(gtk::Align::Start);
-
-        list_item
-            .property_expression("item")
-            .chain_property::<TreeListRow>("item")
-            .chain_property::<FileObject>("priority")
-            .chain_closure::<String>(gtk::glib::closure!(|_: Option<gtk::glib::Object>, priority: i8| {
-              match priority {
-                -1 => "Low",
-                0  => "Normal",
-                1  => "High",
-                _ =>  "Normal"
-              }
-            }))
-            .bind(&label, "label", gtk::Widget::NONE);
-    });
-    
-    file_table.append_column(
-        &gtk::ColumnViewColumn::builder()
-          .title("Priority")
-          .expand(true)
-          .factory(&priority_factory)
-          .build()
-        );
-
-    gtk::ScrolledWindow::builder()
-        .min_content_width(360)
-        .vexpand(true)
-        .child(file_table)
-        .build()
-}
 
 
 async fn move_torrent_dialog<W: IsA<gtk::Window>>(window: Rc<W>, sender: mpsc::Sender<TorrentCmd>, id: i64, category_model:Rc<gio::ListStore>, filter:Rc<gtk::CustomFilter>) {
@@ -1514,7 +1320,7 @@ async fn move_torrent_dialog<W: IsA<gtk::Window>>(window: Rc<W>, sender: mpsc::S
         let folder = o.property_value("string").get::<String>().expect("should be string"); 
         sender.send(TorrentCmd::Move(vec![id], folder, is_move)).await.expect("failure snd move");
 
-        task::sleep(std::time::Duration::from_millis(3000)).await;
+        async_std::task::sleep(std::time::Duration::from_millis(3000)).await;
         filter.changed(gtk::FilterChange::MoreStrict); // now only need to schedule this call
      }
   } 
@@ -1547,7 +1353,7 @@ async fn deletion_confiramtion_dialog<W: IsA<gtk::Window>>(window: Rc<W>, sender
   }
 }
 
-async fn add_torrent_file_dialog<W: IsA<gtk::Window>>(_window: Rc<W> , sender: mpsc::Sender<TorrentCmd>, category_model:Rc<gio::ListStore>, filter:Rc<gtk::CustomFilter>) {
+async fn add_torrent_file_dialog<W: IsA<gtk::Window>>(_window: Rc<W> , sender: mpsc::Sender<TorrentCmd>, filter:Rc<gtk::CustomFilter>) {
     let dialog = gtk::FileChooserDialog::new(
         Some("Select .torrent file"), Some(&*_window), gtk::FileChooserAction::Open, &[("Open", gtk::ResponseType::Ok), ("Cancel", gtk::ResponseType::Cancel)]);
     let torrent_file_filter = gtk::FileFilter::new();
@@ -1558,13 +1364,13 @@ async fn add_torrent_file_dialog<W: IsA<gtk::Window>>(_window: Rc<W> , sender: m
     if response == gtk::ResponseType::Ok {
         if let Some(file) = dialog.file() {
             if let Some(path) = file.path() {
-                gtk::glib::MainContext::default().spawn_local(add_torrent_dialog(Rc::clone(&_window), sender, None, Some(path), category_model, filter));
+                gtk::glib::MainContext::default().spawn_local(add_torrent_dialog(Rc::clone(&_window), sender, None, Some(path), filter));
             }
         }
     }
 }
 
-async fn add_magnet_dialog<W: IsA<gtk::Window>>(_window: Rc<W> , sender: mpsc::Sender<TorrentCmd>, category_model:Rc<gio::ListStore>, filter:Rc<gtk::CustomFilter>) {
+async fn add_magnet_dialog<W: IsA<gtk::Window>>(_window: Rc<W> , sender: mpsc::Sender<TorrentCmd>, filter:Rc<gtk::CustomFilter>) {
   let dialog = gtk::Dialog::builder()
         .transient_for(&*_window)
         .modal(true)
@@ -1598,190 +1404,10 @@ async fn add_magnet_dialog<W: IsA<gtk::Window>>(_window: Rc<W> , sender: mpsc::S
     if response == gtk::ResponseType::Ok {
         let s = text.text().to_string();
         if s.starts_with("magnet:") {
-                gtk::glib::MainContext::default().spawn_local(add_torrent_dialog(Rc::clone(&_window), sender, Some(s), None, category_model, filter));
+                gtk::glib::MainContext::default().spawn_local(add_torrent_dialog(Rc::clone(&_window), sender, Some(s), None, filter));
         }
     }
 }
-
-
-async fn add_torrent_dialog2(container: gtk::Box, 
-                             sender: mpsc::Sender<TorrentCmd>, 
-                             magnet_url: Option<String>, 
-                             torrent_file:Option<PathBuf>, 
-                             category_model:Rc<gio::ListStore>, 
-                             filter:Rc<gtk::CustomFilter>,
-                             future: Box<dyn Future<Output = gtk::ResponseType>>) {
-}
-async fn add_torrent_dialog<W: IsA<gtk::Window>>(window: Rc<W>, sender: mpsc::Sender<TorrentCmd>, magnet_url: Option<String>, torrent_file:Option<PathBuf>, category_model:Rc<gio::ListStore>, filter:Rc<gtk::CustomFilter>) {
-   use lava_torrent::torrent::v1::Torrent;
-
-//  task::sleep(std::time::Duration::from_millis(2000)).await;
-    let model = gtk::StringList::new(&vec![]);
-    let mut i = 0;
-    while let Some(x) = category_model.item(i) {
-//        let name = x.property_value("download-dir").get::<String>().expect("skdfj1");
-        let folder = x.property_value("download-dir").get::<String>().expect("skdfj1");
-        let is_folder = x.property_value("is-folder").get::<bool>().expect("skdfj1");
-        if is_folder {
-            model.append(folder.as_str());
-        } 
-        i +=1 ;
-    }
-
-  let vbox = gtk::Box::new(gtk::Orientation::Vertical, 4);
-
-  let file_hbox = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-  vbox.append(&file_hbox);
-
-  let l = gtk::Label::new(Some("Torrent file"));
-  file_hbox.append(&l);
-
-  let _cancel_fetch = Rc::new(Cell::new(false));
-  let _magnet_done = Rc::new(Cell::new(false));
-  let file_chooser = gtk::Button::new();
-  file_hbox.append(&file_chooser);
-
-  let dialog = gtk::Dialog::builder()
-        .transient_for(&*window)
-        .modal(true)
-        .build();
-
-  dialog.add_button("Cancel", gtk::ResponseType::Cancel);
-  dialog.add_button("Add", gtk::ResponseType::Ok);
-
-  let hbox = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-  let l = gtk::Label::new(Some("Destination"));
-  hbox.append(&l);
-  let destination = gtk::DropDown::builder().model(&model).build();
-  hbox.append(&destination);
-  vbox.append(&hbox);
-
-  let file_table = gtk::ColumnView::new(None::<&gtk::NoSelection>);
-  let scrolled_files = build_bottom_files(&file_table, false);
-
-
- // let stupid_model = create_file_model(&Rc::new(RefCell::new(utils::build_tree(&files))));
-  let stupid_model = create_file_model(&Rc::new(RefCell::new(utils::build_tree(&vec![]))));
-  let files_selection = gtk::NoSelection::new(Some(&stupid_model));
-  file_table.set_model(Some(&files_selection));
-
-
-  if let Some(ref path_buf) = torrent_file {
-     let pb2 = path_buf.clone();
-     let path = pb2.into_boxed_path();
-     let s = path.to_str().unwrap();
-     let torrent = Torrent::read_from_file(path.clone()).unwrap();
-     let files = torrent.files.unwrap().iter().map(|f| transmission::File {name: f.path.as_path().to_str().unwrap().to_string(), length: f.length as u64, bytes_completed: 0  } ).collect();
-     let stupid_model = create_file_model(&Rc::new(RefCell::new(utils::build_tree(&files))));
-     let files_selection = gtk::NoSelection::new(Some(&stupid_model));
-     file_table.set_model(Some(&files_selection));
-     file_chooser.set_label(&s);
-  }
-  let magnet_data =  Rc::new(RefCell::new(None));
-  let progressbar = gtk::ProgressBar::new();
-  let _progressbar = Rc::new(progressbar);
-  if let Some(ref magnet) = magnet_url {
-      let foo : String = magnet.chars().into_iter().take(60).collect();
-      let _file_table = Rc::new(file_table);
-      if let Result::Ok(m) = Magnet::new(magnet) { 
-          let s = m.dn.as_ref().map(|l| urlencoding::decode(l).expect("UTF-8").into_owned());
-//        println!("{}", m.dn.expect("foo"));
-        file_chooser.set_label(&s.unwrap_or(foo));
-        gtk::glib::MainContext::default().spawn_local(pulse_progress(Rc::clone(&_progressbar), Rc::clone(&_magnet_done)));
-        gtk::glib::MainContext::default().spawn_local(fetch_magnet_link(magnet.to_string(), Rc::clone(&_file_table), Rc::clone(&_cancel_fetch), Rc::clone(&_magnet_done), Rc::clone(&magnet_data)));
-      } else {
-         // FIXME: report error on wrong magnets..
-      }
-  }
-
-  scrolled_files.set_min_content_width(580);
-  scrolled_files.set_min_content_height(320);
-  vbox.append(&scrolled_files);
-  vbox.append(&*_progressbar);
-
-  
-
-  let hbox = gtk::Box::new(gtk::Orientation::Horizontal, 8);
- // let l = gtk::Label::new(Some("Torrent priority"));
- // hbox.append(&l);
-//  let priority = gtk::DropDown::builder().build();
-//  hbox.append(&priority);
-  vbox.append(&hbox);
-
-  let start_paused_checkbox = gtk::CheckButton::builder().active(false).label("Start paused").build(); 
-  vbox.append(&start_paused_checkbox);
-  let delete_torrent_file = gtk::CheckButton::builder().active(true).label("Delete torrent file").build(); 
-  vbox.append(&delete_torrent_file);
-  delete_torrent_file.set_sensitive(false);
-
-  dialog.content_area().append(&vbox); // and a label for destination))
-  dialog.set_css_classes(&["simple-dialog"]);
-  let response = dialog.run_future().await;
-  dialog.close();
-  _cancel_fetch.set(true);
-  _magnet_done.set(true);
-  if response == gtk::ResponseType::Ok {
-       let start_paused =start_paused_checkbox.is_active();
-       let folder = destination.selected_item().map(|x| x.property_value("string").get::<String>().expect("should be string")); 
-       if let Some(path_buf) = torrent_file {
-         let buf = std::fs::read(path_buf).expect("file invalid");
-         let metainfo = base64::encode(buf);
-         sender.send(TorrentCmd::AddTorrent(folder, None, Some(metainfo), start_paused)).await.expect("failure snd move");
-       } else if let Some(data) = &*magnet_data.borrow() {
-         let metainfo = base64::encode(data);
-         sender.send(TorrentCmd::AddTorrent(folder, None, Some(metainfo), start_paused)).await.expect("failure snd move");
-       } else if let Some(url) = magnet_url {
-         sender.send(TorrentCmd::AddTorrent(folder, Some(url.to_string()), None, start_paused)).await.expect("failure snd move");
-       } else {
-           println!("Error adding torrent. No magnet link and no torrent file is specified");
-       }
-
-        task::sleep(std::time::Duration::from_millis(3000)).await;
-        filter.changed(gtk::FilterChange::LessStrict); // unnecesserry as we adding the torrent  
-    
-  } 
-}
-
-async fn pulse_progress(_progressbar: Rc<gtk::ProgressBar>, _magnet_done: Rc<Cell<bool>>) {
-    loop {
-        if _magnet_done.get() {
-            break;
-        }
-        _progressbar.pulse();
-       task::sleep(std::time::Duration::from_millis(200)).await;
-    }
-    _progressbar.set_fraction(1.0);
-}
-
-async fn fetch_magnet_link(uri: String, _file_table: Rc<gtk::ColumnView>, cancellation: Rc<Cell<bool>>, done: Rc<Cell<bool>>, magnet_data: Rc<RefCell<Option<Vec<u8>>>>) {
-    use lava_torrent::torrent::v1::Torrent;
-    let maybe_torrent = magnet_to_metainfo(&uri, cancellation).await; 
-    done.set(true);
-    if let Some(ref data) = maybe_torrent {
-      let res = Torrent::read_from_bytes(data);
-      if let Result::Ok(torrent) = res {
-        if let Some(xs) = torrent.files { 
-          let files = xs.iter().map(|f| transmission::File {name: f.path.as_path().to_str().expect("bloody name?").to_string(), length: f.length as u64, bytes_completed: 0  } ).collect();
-          let stupid_model = create_file_model(&Rc::new(RefCell::new(utils::build_tree(&files))));
-          let files_selection = gtk::NoSelection::new(Some(&stupid_model));
-          _file_table.set_model(Some(&files_selection));
-          (*magnet_data).replace(Some(data.to_vec()));
-        } else {
-            // the file is the name 
-            // TODO: same needs to be done for file details
-          let files =  vec![transmission::File {name: torrent.name, length: torrent.length as u64, bytes_completed: 0  }];
-          let stupid_model = create_file_model(&Rc::new(RefCell::new(utils::build_tree(&files))));
-          let files_selection = gtk::NoSelection::new(Some(&stupid_model));
-          _file_table.set_model(Some(&files_selection));
-          _file_table.set_sensitive(false);
-          (*magnet_data).replace(Some(data.to_vec()));
-        }
-      } else {
-          println!("Error: {:?}", res); // FIXME: error mngmnt
-      }
-    }
-}
-
 // now, this is not really necessary, as we have NumericSorter and StringSorter.Except, how to
 // reverse those fucking sorters?
 fn sort_by_property<'a, T>(property_name: &'static str, desc: bool) -> gtk::CustomSorter  
@@ -1811,7 +1437,7 @@ fn label_setup<T, R, F>(property_name: &'static str, f: F) -> impl Fn(&gtk::Sign
 
         let g = std::sync::Arc::clone(&f1);
         
-        list_item
+                          list_item
             .property_expression("item")
             .chain_property::<T>(property_name)
             .chain_closure::<String>(gtk::glib::closure!(move |_: Option<gtk::glib::Object>, x: R| {
