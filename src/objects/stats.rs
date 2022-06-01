@@ -1,4 +1,3 @@
-
 use glib::Object;
 use gtk::glib;
 
@@ -7,15 +6,11 @@ glib::wrapper! {
 }
 
 impl Stats {
-    pub fn new(
-        upload: u64,
-        download: u64,
-        free_space: u64,
-    ) -> Self {
+    pub fn new(upload: u64, download: u64, free_space: u64) -> Self {
         Object::new(&[
             ("upload", &upload),
             ("download", &download),
-            ("free-space", &free_space)
+            ("free-space", &free_space),
         ])
         .expect("Failed to create 'Stats'")
     }

@@ -1,4 +1,3 @@
-
 use glib::Object;
 use gtk::glib;
 
@@ -8,28 +7,28 @@ glib::wrapper! {
 
 impl TrackerObject {
     pub fn new(
-      id: &u64,
-      announce: &String,
-      tier: &u64,
-      leecher_count: &i64,
-      host: &String,
-      scrape: &String,
-      seeder_count: &i64,
-      last_announce_peer_count: &u64,
-      last_announce_result: &String,
-      last_announce_time: &u64,
+        id: &u64,
+        announce: &String,
+        tier: &u64,
+        leecher_count: &i64,
+        host: &String,
+        scrape: &String,
+        seeder_count: &i64,
+        last_announce_peer_count: &u64,
+        last_announce_result: &String,
+        last_announce_time: &u64,
     ) -> Self {
         Object::new(&[
-          ("id", &id),
-          ("announce", &announce),
-          ("scrape", &scrape),
-          ("tier", &tier),
-          ("leecher-count", &leecher_count),
-          ("host", &host),
-          ("seeder-count", &seeder_count),
-          ("last-announce-peer-count", &last_announce_peer_count),
-          ("last-announce-result", &last_announce_result),
-          ("last-announce-time", &last_announce_time),
+            ("id", &id),
+            ("announce", &announce),
+            ("scrape", &scrape),
+            ("tier", &tier),
+            ("leecher-count", &leecher_count),
+            ("host", &host),
+            ("seeder-count", &seeder_count),
+            ("last-announce-peer-count", &last_announce_peer_count),
+            ("last-announce-result", &last_announce_result),
+            ("last-announce-time", &last_announce_time),
         ])
         .expect("Failed to create 'TrackerObject'")
     }
@@ -37,25 +36,25 @@ impl TrackerObject {
 
 mod imp {
 
-use gtk::{glib::ParamSpecString, subclass::prelude::*};
-use gtk::glib;
-use glib::{ParamFlags, ParamSpec, ParamSpecUInt64, Value, ParamSpecInt64};
-use gtk::prelude::*;
-use once_cell::sync::Lazy;
-use std::cell::{RefCell, Cell};
+    use glib::{ParamFlags, ParamSpec, ParamSpecInt64, ParamSpecUInt64, Value};
+    use gtk::glib;
+    use gtk::prelude::*;
+    use gtk::{glib::ParamSpecString, subclass::prelude::*};
+    use once_cell::sync::Lazy;
+    use std::cell::{Cell, RefCell};
 
     #[derive(Default)]
     pub struct TrackerObject {
-      id: Cell<u64>,
-      announce: RefCell<String>,
-      scrape: RefCell<String>,
-      tier: Cell<u64>,
-      leecher_count: Cell<i64>,
-      host: RefCell<String>,
-      seeder_count: Cell<i64>,
-      last_announce_peer_count: Cell<u64>,
-      last_announce_result: RefCell<String>,
-      last_announce_time: Cell<u64>,
+        id: Cell<u64>,
+        announce: RefCell<String>,
+        scrape: RefCell<String>,
+        tier: Cell<u64>,
+        leecher_count: Cell<i64>,
+        host: RefCell<String>,
+        seeder_count: Cell<i64>,
+        last_announce_peer_count: Cell<u64>,
+        last_announce_result: RefCell<String>,
+        last_announce_time: Cell<u64>,
     }
 
     // The central trait for subclassing a GObject

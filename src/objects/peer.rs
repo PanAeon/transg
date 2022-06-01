@@ -1,4 +1,3 @@
-
 use glib::Object;
 use gtk::glib;
 
@@ -8,20 +7,20 @@ glib::wrapper! {
 
 impl PeerObject {
     pub fn new(
-      address: &String,
-      client_name: &String,
-      progress: &f64,
-      rate_to_client: &u64,
-      rate_to_peer: &u64,
-      flag_str: &String,
+        address: &String,
+        client_name: &String,
+        progress: &f64,
+        rate_to_client: &u64,
+        rate_to_peer: &u64,
+        flag_str: &String,
     ) -> Self {
         Object::new(&[
-          ("address", &address),
-("client-name", &client_name),
-("progress", &progress),
-("rate-to-client", &rate_to_client),
-("rate-to-peer", &rate_to_peer),
-("flag-str", &flag_str),
+            ("address", &address),
+            ("client-name", &client_name),
+            ("progress", &progress),
+            ("rate-to-client", &rate_to_client),
+            ("rate-to-peer", &rate_to_peer),
+            ("flag-str", &flag_str),
         ])
         .expect("Failed to create 'PeerObject'")
     }
@@ -29,21 +28,21 @@ impl PeerObject {
 
 mod imp {
 
-use gtk::glib::{self, ParamSpecString, ParamSpecDouble};
-use glib::{ParamFlags, ParamSpec, ParamSpecUInt64, Value};
-use gtk::prelude::*;
-use once_cell::sync::Lazy;
-use std::cell::{RefCell, Cell};
-use gtk::subclass::prelude::*;
+    use glib::{ParamFlags, ParamSpec, ParamSpecUInt64, Value};
+    use gtk::glib::{self, ParamSpecDouble, ParamSpecString};
+    use gtk::prelude::*;
+    use gtk::subclass::prelude::*;
+    use once_cell::sync::Lazy;
+    use std::cell::{Cell, RefCell};
 
     #[derive(Default)]
     pub struct PeerObject {
-      address: RefCell<String>,
-client_name: RefCell<String>,
-progress: Cell<f64>,
-rate_to_client: Cell<u64>,
-rate_to_peer: Cell<u64>,
-flag_str: RefCell<String>,
+        address: RefCell<String>,
+        client_name: RefCell<String>,
+        progress: Cell<f64>,
+        rate_to_client: Cell<u64>,
+        rate_to_peer: Cell<u64>,
+        flag_str: RefCell<String>,
     }
 
     // The central trait for subclassing a GObject

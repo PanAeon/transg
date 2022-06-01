@@ -2,8 +2,8 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 use serde_json::Value;
 //use std::cell::RefCell;
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use serde::{Serialize, Deserialize};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -24,7 +24,7 @@ pub struct FreeSpace {
     pub path: String,
     #[serde(rename = "size-bytes")]
     pub size_bytes: u64,
-//    pub total_size: u64
+    //    pub total_size: u64
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -64,67 +64,93 @@ pub struct File {
     pub name: String,
     pub length: u64,
     #[serde(rename = "bytesCompleted")]
-    pub bytes_completed: u64
+    pub bytes_completed: u64,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct FileStats {
-  pub wanted: bool,
-  pub priority: i8,
-  #[serde(rename = "bytesCompleted")]
-  pub bytes_completed: u64,
+    pub wanted: bool,
+    pub priority: i8,
+    #[serde(rename = "bytesCompleted")]
+    pub bytes_completed: u64,
 }
-
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct TrackerStats {
-  #[serde(rename = "leecherCount")]
-  pub leecher_count: i64,
-  pub id: u64,
-  pub host: String,
-  pub scrape: String,
-  #[serde(rename = "seederCount")]
-  pub seeder_count: i64,
-  #[serde(rename = "lastAnnouncePeerCount")]
-  pub last_announce_peer_count: u64,
-  #[serde(rename = "lastAnnounceResult")]
-  pub last_announce_result: String,
-  #[serde(rename = "lastAnnounceTime")]
-  pub last_announce_time: u64,
+    #[serde(rename = "leecherCount")]
+    pub leecher_count: i64,
+    pub id: u64,
+    pub host: String,
+    pub scrape: String,
+    #[serde(rename = "seederCount")]
+    pub seeder_count: i64,
+    #[serde(rename = "lastAnnouncePeerCount")]
+    pub last_announce_peer_count: u64,
+    #[serde(rename = "lastAnnounceResult")]
+    pub last_announce_result: String,
+    #[serde(rename = "lastAnnounceTime")]
+    pub last_announce_time: u64,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Tracker {
- pub id: u64,
- pub announce: String,
- pub scrape: String,
- pub tier: u64
+    pub id: u64,
+    pub announce: String,
+    pub scrape: String,
+    pub tier: u64,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Peer {
-  pub address: String,
-  #[serde(rename = "clientName")]
-  pub client_name: String,
-  pub progress: f64,
-  #[serde(rename = "rateToClient")]
-  pub rate_to_client: u64,
-  #[serde(rename = "rateToPeer")]
-  pub rate_to_peer: u64,
-  #[serde(rename = "flagStr")]
-  pub flag_str: String,
+    pub address: String,
+    #[serde(rename = "clientName")]
+    pub client_name: String,
+    pub progress: f64,
+    #[serde(rename = "rateToClient")]
+    pub rate_to_client: u64,
+    #[serde(rename = "rateToPeer")]
+    pub rate_to_peer: u64,
+    #[serde(rename = "flagStr")]
+    pub flag_str: String,
 }
-static TORRENT_DETAILS_FIELDS: &'static[&'static str] = &[
-  "id", "name", "eta", "sizeWhenDone", "seederCount", "leecherCount",
-  "downloadDir", "comment", "hashString", "rateDownload", "rateUpload",
-  "uploadRatio", "seedRatioLimit", "priority", "doneDate", "percentDone",
-  "downloadedEver", "uploadedEver", "corruptEver", "status",
-  "labels", "pieceCount", "pieces", "files", "fileStats", "priorities",
-  "wanted", "peers", "peer", "trackers", "trackerStats", "error", "errorString"
+static TORRENT_DETAILS_FIELDS: &'static [&'static str] = &[
+    "id",
+    "name",
+    "eta",
+    "sizeWhenDone",
+    "seederCount",
+    "leecherCount",
+    "downloadDir",
+    "comment",
+    "hashString",
+    "rateDownload",
+    "rateUpload",
+    "uploadRatio",
+    "seedRatioLimit",
+    "priority",
+    "doneDate",
+    "percentDone",
+    "downloadedEver",
+    "uploadedEver",
+    "corruptEver",
+    "status",
+    "labels",
+    "pieceCount",
+    "pieces",
+    "files",
+    "fileStats",
+    "priorities",
+    "wanted",
+    "peers",
+    "peer",
+    "trackers",
+    "trackerStats",
+    "error",
+    "errorString",
 ];
 #[derive(Deserialize, Debug, Clone)]
 pub struct Torrents {
-    pub torrents: Vec<TorrentDetails>
+    pub torrents: Vec<TorrentDetails>,
 }
 #[derive(Deserialize, Debug, Clone)]
 pub struct TorrentDetails {
@@ -179,46 +205,45 @@ pub struct TorrentDetails {
     pub tracker_stats: Vec<TrackerStats>,
     pub error: i64,
     #[serde(rename = "errorString")]
-    pub error_string: String
-
+    pub error_string: String,
 }
 
 #[derive(Serialize, Debug, Clone)]
 pub struct TorrentAdd {
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub cookies: Option<String>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  #[serde(rename = "download-dir")]
-  pub download_dir: Option<String>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub filename: Option<String>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub labels: Option<Vec<String>>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub metainfo: Option<String>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub paused: Option<bool>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  #[serde(rename = "peer-limit")]
-  pub peer_limit: Option<i64>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  #[serde(rename = "bandwidthPriority")]
-  pub bandwith_priority: Option<i64>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  #[serde(rename = "files-wanted")]
-  pub files_wanted: Option<Vec<i64>>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  #[serde(rename = "files-unwanted")]
-  pub files_unwanted: Option<Vec<i64>>,
-  #[serde(rename = "priority-high")]
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub priority_high: Option<Vec<i64>>,
-  #[serde(rename = "priority-high")]
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub priority_low: Option<Vec<i64>>,
-  #[serde(rename = "priority-high")]
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub priority_normal: Option<Vec<i64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cookies: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "download-dir")]
+    pub download_dir: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub labels: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metainfo: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paused: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "peer-limit")]
+    pub peer_limit: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "bandwidthPriority")]
+    pub bandwith_priority: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "files-wanted")]
+    pub files_wanted: Option<Vec<i64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "files-unwanted")]
+    pub files_unwanted: Option<Vec<i64>>,
+    #[serde(rename = "priority-high")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priority_high: Option<Vec<i64>>,
+    #[serde(rename = "priority-high")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priority_low: Option<Vec<i64>>,
+    #[serde(rename = "priority-high")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priority_normal: Option<Vec<i64>>,
 }
 
 // FIXME: how to work with http errors? async errors?
@@ -237,30 +262,32 @@ impl TransmissionClient {
         Ok(self
             .execute(json!({
                  "method": "session-stats"
-            })).await?)
+            }))
+            .await?)
     }
 
     pub async fn get_free_space(&self, path: &str) -> Result<RpcResponse<FreeSpace>> {
-        Ok(self.execute(json!({
+        Ok(self
+            .execute(json!({
                  "method": "free-space",
                  "arguments": {
                      "path": &path
                  }
-            })).await?)
+            }))
+            .await?)
     }
 
     #[allow(dead_code)]
-    pub async fn get_torrent_details(&self, ids: Vec<i64> ) -> Result<RpcResponse<Torrents>> {
-        self
-            .execute(json!({
-                 "method": "torrent-get",
-                 "arguments": {
-                   "ids": &ids,
-                   "fields": TORRENT_DETAILS_FIELDS,
-                   "format": "objects"
-                 }
-            }))
-            .await
+    pub async fn get_torrent_details(&self, ids: Vec<i64>) -> Result<RpcResponse<Torrents>> {
+        self.execute(json!({
+             "method": "torrent-get",
+             "arguments": {
+               "ids": &ids,
+               "fields": TORRENT_DETAILS_FIELDS,
+               "format": "objects"
+             }
+        }))
+        .await
     }
 
     #[allow(dead_code)]
@@ -445,9 +472,9 @@ impl TransmissionClient {
         s.to_string()
     }
 
-    pub async fn execute<R>(&self, json: Value) -> Result<R> 
-    where 
-      R: DeserializeOwned + std::fmt::Debug
+    pub async fn execute<R>(&self, json: Value) -> Result<R>
+    where
+        R: DeserializeOwned + std::fmt::Debug,
     {
         // TODO: well, it doesn't matter here because TorrentClient is behind a channel, so it's
         // not really concurrent. But if so, how to tell rust it is OK to mutate hmm
@@ -459,7 +486,6 @@ impl TransmissionClient {
             .json(&json)
             .send()
             .await?;
-
 
         let response = match response.status() {
             reqwest::StatusCode::CONFLICT => {

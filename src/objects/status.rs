@@ -1,4 +1,3 @@
-
 use glib::Object;
 use gtk::glib;
 
@@ -7,15 +6,8 @@ glib::wrapper! {
 }
 
 impl StatusInfo {
-    pub fn new(
-        id: i64,
-        count: u64,
-    ) -> Self {
-        Object::new(&[
-            ("id", &id),
-            ("count", &count),
-        ])
-        .expect("Failed to create 'StatusInfo'")
+    pub fn new(id: i64, count: u64) -> Self {
+        Object::new(&[("id", &id), ("count", &count)]).expect("Failed to create 'StatusInfo'")
     }
 }
 

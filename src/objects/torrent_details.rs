@@ -1,6 +1,6 @@
+use crate::transmission::TorrentDetails;
 use glib::Object;
 use gtk::glib;
-use crate::transmission::TorrentDetails;
 
 glib::wrapper! {
     pub struct TorrentDetailsObject(ObjectSubclass<imp::TorrentDetailsObject>);
@@ -28,18 +28,18 @@ impl TorrentDetailsObject {
         downloaded_ever: &u64,
         uploaded_ever: &u64,
         corrupt_ever: &u64,
-//        labels: &Vec<String>,
+        //        labels: &Vec<String>,
         piece_count: &u64,
         pieces: &String,
         error: &i64,
         error_string: &String,
-      //  files: &Vec<FileObject>,
-      //  file_stats: &Vec<FileStatsObject>,
-      //  priorities: &Vec<u8>,
-      //  wanted: &Vec<u8>,
-      //  peers: &Vec<PeerObject>,
-      //  trackers: &Vec<TrackerObject>,
-      //  tracker_stats: &Vec<TrackerStatsObject>,
+        //  files: &Vec<FileObject>,
+        //  file_stats: &Vec<FileStatsObject>,
+        //  priorities: &Vec<u8>,
+        //  wanted: &Vec<u8>,
+        //  peers: &Vec<PeerObject>,
+        //  trackers: &Vec<TrackerObject>,
+        //  tracker_stats: &Vec<TrackerStatsObject>,
     ) -> Self {
         Object::new(&[
             ("id", &id),
@@ -62,40 +62,61 @@ impl TorrentDetailsObject {
             ("downloaded-ever", &downloaded_ever),
             ("uploaded-ever", &uploaded_ever),
             ("corrupt-ever", &corrupt_ever),
- //           ("labels", &labels),
+            //           ("labels", &labels),
             ("piece-count", &piece_count),
             ("pieces", &pieces),
             ("error", &error),
-            ("error-string", &error_string)
-          //  ("files", &files),
-          //  ("file-stats", &file_stats),
-          //  ("priorities", &priorities),
-          //  ("wanted", &wanted),
-          //  ("peers", &peers),
-          //  ("trackers", &trackers),
-          //  ("tracker-stats", &tracker_stats),
+            ("error-string", &error_string), //  ("files", &files),
+                                             //  ("file-stats", &file_stats),
+                                             //  ("priorities", &priorities),
+                                             //  ("wanted", &wanted),
+                                             //  ("peers", &peers),
+                                             //  ("trackers", &trackers),
+                                             //  ("tracker-stats", &tracker_stats),
         ])
         .expect("Failed to create 'TorrentDetailsObject'")
     }
-
 }
 impl Default for TorrentDetailsObject {
     fn default() -> Self {
-        Self::new(&0, &String::from("shit"), &0, &0, &0, &0, &0, &String::from(""), &String::from(""), &String::from(""), &0, &0,
-          &0.0, &0, &0, &0, &0.0, &0, &0, &0, &0, &String::from(""), &0, &String::from(""))
+        Self::new(
+            &0,
+            &String::from("shit"),
+            &0,
+            &0,
+            &0,
+            &0,
+            &0,
+            &String::from(""),
+            &String::from(""),
+            &String::from(""),
+            &0,
+            &0,
+            &0.0,
+            &0,
+            &0,
+            &0,
+            &0.0,
+            &0,
+            &0,
+            &0,
+            &0,
+            &String::from(""),
+            &0,
+            &String::from(""),
+        )
     }
 }
 
-
 mod imp {
 
-use gtk::glib::ParamSpecDouble;
-use once_cell::sync::Lazy;
-use std::cell::{RefCell, Cell};
-use glib::{ParamFlags, ParamSpec, ParamSpecString, ParamSpecInt64, ParamSpecUInt64, Value};
-use gtk::glib;
-use gtk::prelude::*;
-use gtk::subclass::prelude::*;
+    use glib::{ParamFlags, ParamSpec, ParamSpecInt64, ParamSpecString, ParamSpecUInt64, Value};
+    use gtk::glib;
+    use gtk::glib::ParamSpecDouble;
+    use gtk::prelude::*;
+    use gtk::subclass::prelude::*;
+    use once_cell::sync::Lazy;
+    use std::cell::{Cell, RefCell};
 
     #[derive(Default)]
     pub struct TorrentDetailsObject {
@@ -124,13 +145,13 @@ use gtk::subclass::prelude::*;
         pieces: RefCell<String>,
         error: Cell<i64>,
         error_string: RefCell<String>,
-     //   files: RefCell<Vec<FileObject>>,
-     //   file_stats: RefCell<Vec<FileStatsObject>>,
-     //   priorities: RefCell<Vec<u8>>,
-     //   wanted: RefCell<Vec<u8>>,
-     //   peers: RefCell<Vec<PeerObject>>,
-     //   trackers: RefCell<Vec<TrackerObject>>,
-     //   tracker_stats: RefCell<Vec<TrackerStatsObject>>,
+        //   files: RefCell<Vec<FileObject>>,
+        //   file_stats: RefCell<Vec<FileStatsObject>>,
+        //   priorities: RefCell<Vec<u8>>,
+        //   wanted: RefCell<Vec<u8>>,
+        //   peers: RefCell<Vec<PeerObject>>,
+        //   trackers: RefCell<Vec<TrackerObject>>,
+        //   tracker_stats: RefCell<Vec<TrackerStatsObject>>,
     }
 
     // The central trait for subclassing a GObject
@@ -259,5 +280,4 @@ ParamSpecString::new( "error-string", "error-string", "error-string", None, Para
             }
         }
     }
-
 }

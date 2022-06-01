@@ -6,21 +6,14 @@ glib::wrapper! {
 }
 
 impl FolderInfo {
-    pub fn new(
-        name: String,
-        count: u64,
-    ) -> Self {
-        Object::new(&[
-            ("name", &name),
-            ("count", &count),
-        ])
-        .expect("Failed to create 'FolderInfo'")
+    pub fn new(name: String, count: u64) -> Self {
+        Object::new(&[("name", &name), ("count", &count)]).expect("Failed to create 'FolderInfo'")
     }
 }
 
 mod imp {
 
-    use glib::{ParamFlags, ParamSpec, ParamSpecUInt64, ParamSpecString, Value};
+    use glib::{ParamFlags, ParamSpec, ParamSpecString, ParamSpecUInt64, Value};
     use gtk::glib;
     use gtk::prelude::*;
     use gtk::subclass::prelude::*;

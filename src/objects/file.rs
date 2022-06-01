@@ -1,4 +1,3 @@
-
 use glib::Object;
 use gtk::glib;
 
@@ -7,21 +6,14 @@ glib::wrapper! {
 }
 
 impl FileObject {
-    pub fn new(
-      name: &String,
-      path: &String,
-      size: &u64,
-      progress: &f64,
-      download: bool,
-      priority: i8,
-    ) -> Self {
+    pub fn new(name: &String, path: &String, size: &u64, progress: &f64, download: bool, priority: i8) -> Self {
         Object::new(&[
-          ("name", &name),
-          ("path", &path),
-          ("size", &size),
-          ("progress", &progress),
-          ("download", &download),
-          ("priority", &priority)
+            ("name", &name),
+            ("path", &path),
+            ("size", &size),
+            ("progress", &progress),
+            ("download", &download),
+            ("priority", &priority),
         ])
         .expect("Failed to create 'FileObject'")
     }
@@ -29,23 +21,23 @@ impl FileObject {
 
 mod imp {
 
-use gtk::glib::ParamSpecBoolean;
-use gtk::glib::ParamSpecString;
-use once_cell::sync::Lazy;
-use std::cell::{RefCell, Cell};
-use glib::{ParamFlags, ParamSpec, ParamSpecChar, ParamSpecUInt64, Value, ParamSpecDouble};
-use gtk::glib;
-use gtk::prelude::*;
-use gtk::subclass::prelude::*;
+    use glib::{ParamFlags, ParamSpec, ParamSpecChar, ParamSpecDouble, ParamSpecUInt64, Value};
+    use gtk::glib;
+    use gtk::glib::ParamSpecBoolean;
+    use gtk::glib::ParamSpecString;
+    use gtk::prelude::*;
+    use gtk::subclass::prelude::*;
+    use once_cell::sync::Lazy;
+    use std::cell::{Cell, RefCell};
 
     #[derive(Default)]
     pub struct FileObject {
-      name: RefCell<String>,
-      path: RefCell<String>,
-      size: Cell<u64>,
-      progress: Cell<f64>,
-      download: Cell<bool>,
-      priority: Cell<i8>,
+        name: RefCell<String>,
+        path: RefCell<String>,
+        size: Cell<u64>,
+        progress: Cell<f64>,
+        download: Cell<bool>,
+        priority: Cell<i8>,
     }
 
     // The central trait for subclassing a GObject

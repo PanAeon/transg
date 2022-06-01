@@ -6,19 +6,13 @@ glib::wrapper! {
 }
 
 impl CategoryObject {
-    pub fn new(
-        name: String,
-        count: u64,
-        status: i64,
-        is_folder: bool,
-        download_dir: String 
-    ) -> Self {
+    pub fn new(name: String, count: u64, status: i64, is_folder: bool, download_dir: String) -> Self {
         Object::new(&[
             ("name", &name),
             ("count", &count),
             ("status", &status),
             ("is-folder", &is_folder),
-            ("download-dir", &download_dir)
+            ("download-dir", &download_dir),
         ])
         .expect("Failed to create 'CategoryObject'")
     }
@@ -26,7 +20,7 @@ impl CategoryObject {
 
 mod imp {
 
-    use glib::{ParamFlags, ParamSpec, ParamSpecBoolean,ParamSpecInt64, ParamSpecUInt64, ParamSpecString, Value};
+    use glib::{ParamFlags, ParamSpec, ParamSpecBoolean, ParamSpecInt64, ParamSpecString, ParamSpecUInt64, Value};
     use gtk::glib;
     use gtk::prelude::*;
     use gtk::subclass::prelude::*;
@@ -40,7 +34,7 @@ mod imp {
         count: Cell<u64>,
         status: Cell<i64>,
         is_folder: Cell<bool>,
-        download_dir: RefCell<String>
+        download_dir: RefCell<String>,
     }
 
     // The central trait for subclassing a GObject

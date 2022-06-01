@@ -1,4 +1,3 @@
-
 use glib::Object;
 use gtk::glib;
 
@@ -7,15 +6,11 @@ glib::wrapper! {
 }
 
 impl FileStatsObject {
-    pub fn new(
-      wanted: &bool,
-priority: &u64,
-bytes_completed: &u64,
-    ) -> Self {
+    pub fn new(wanted: &bool, priority: &u64, bytes_completed: &u64) -> Self {
         Object::new(&[
-          ("wanted", &wanted),
-("priority", &priority),
-("bytes-completed", &bytes_completed),
+            ("wanted", &wanted),
+            ("priority", &priority),
+            ("bytes-completed", &bytes_completed),
         ])
         .expect("Failed to create 'FileStatsObject'")
     }
@@ -23,18 +18,18 @@ bytes_completed: &u64,
 
 mod imp {
 
-use gtk::glib::{self, ParamSpecBoolean};
-use glib::{ParamFlags, ParamSpec, ParamSpecUInt64, Value};
-use gtk::prelude::*;
-use once_cell::sync::Lazy;
-use std::cell::Cell;
-use gtk::subclass::prelude::*;
+    use glib::{ParamFlags, ParamSpec, ParamSpecUInt64, Value};
+    use gtk::glib::{self, ParamSpecBoolean};
+    use gtk::prelude::*;
+    use gtk::subclass::prelude::*;
+    use once_cell::sync::Lazy;
+    use std::cell::Cell;
 
     #[derive(Default)]
     pub struct FileStatsObject {
-      wanted: Cell<bool>,
-priority: Cell<u64>,
-bytes_completed: Cell<u64>,
+        wanted: Cell<bool>,
+        priority: Cell<u64>,
+        bytes_completed: Cell<u64>,
     }
 
     // The central trait for subclassing a GObject
