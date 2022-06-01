@@ -1,7 +1,6 @@
 use glib::Object;
 use gtk::glib;
-//use gtk::prelude::*;
-//use gtk::subclass::prelude::*;
+use crate::transmission::TorrentDetails;
 
 glib::wrapper! {
     pub struct TorrentDetailsObject(ObjectSubclass<imp::TorrentDetailsObject>);
@@ -78,6 +77,7 @@ impl TorrentDetailsObject {
         ])
         .expect("Failed to create 'TorrentDetailsObject'")
     }
+
 }
 impl Default for TorrentDetailsObject {
     fn default() -> Self {
@@ -85,6 +85,7 @@ impl Default for TorrentDetailsObject {
           &0.0, &0, &0, &0, &0.0, &0, &0, &0, &0, &String::from(""), &0, &String::from(""))
     }
 }
+
 
 mod imp {
 
@@ -258,4 +259,5 @@ ParamSpecString::new( "error-string", "error-string", "error-string", None, Para
             }
         }
     }
+
 }

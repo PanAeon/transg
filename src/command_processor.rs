@@ -1,11 +1,12 @@
 use lazy_static::lazy_static;
 use crate::transmission::{SessionStats, TransmissionClient, FreeSpace, TorrentDetails, TorrentAdd};
-use tokio::sync::mpsc::{Sender, Receiver, channel};
 use crate::utils::build_tree;
 use tokio::runtime::Runtime;
 use tokio::time::sleep;
 use std::time::Duration;
 use std::fs;
+use gtk::glib;
+use tokio::sync::mpsc;
 
         #[derive(Debug)]
         pub enum TorrentUpdate {
@@ -34,7 +35,7 @@ use std::fs;
             Reannounce(Vec<i64>),
             Move(Vec<i64>, String, bool),
             AddTorrent(Option<String>, Option<String>, Option<String>, bool),// download dir, filename, metainfo, start_paused
-            PoisonPill()
+            //PoisonPill()
         }
 
 lazy_static!{
@@ -44,32 +45,39 @@ lazy_static!{
                 "sizeWhenDone", "downloadDir", "uploadedEver", "uploadRatio", "addedDate"];
 }
 
-struct CommandProcessor {
-  sender : Sender<TorrentCmd>,
-  receiver : Option<Receiver<TorrentCmd>>,
-  update_sender: Sender<TorrentUpdate>,
-  // update_receiver: Receiver<TorrentUpdate>
+pub struct CommandProcessor {
+  sender : mpsc::Sender<TorrentCmd>,
+  receiver : Option<mpsc::Receiver<TorrentCmd>>,
+  update_sender: glib::Sender<TorrentUpdate>,
 }
 
-pub fn create() {
-   //let (tx2, rx2) = channel(); 
-}
 
 impl CommandProcessor {
 
-  pub fn stop(&self) {
-     self.sender.blocking_send(TorrentCmd::PoisonPill()).expect("can't stop..");
-  }
-    // http://192.168.1.217:9091/transmission/rpc
-  pub fn run(&mut self, transmission_url: &'static str, rt:Runtime) {
+    pub fn create() -> (Self, glib::Receiver<TorrentUpdate>) {
+        let (sender, receiver) = mpsc::channel(2048);
+        let (update_sender, update_receiver) = glib::MainContext::channel(glib::PRIORITY_DEFAULT);
+        (CommandProcessor { receiver: Some(receiver), sender, update_sender }, update_receiver)
+    }
+
+    pub fn get_sender(&self) -> mpsc::Sender<TorrentCmd> {
+        self.sender.clone()
+    }
+//  pub fn stop(&self) {
+ //    self.sender.blocking_send(TorrentCmd::PoisonPill()).expect("can't stop..");
+  //}
+    // 
+  pub fn run(&mut self, transmission_url: &'static str) {
         let sender = self.sender.clone();
 
         let update_sender = self.update_sender.clone();
         let _receiver = std::mem::replace(&mut self.receiver, None);
         let mut receiver = _receiver.unwrap();
-
-          let mut i:u64 = 0;
-          rt.spawn(async move {      
+        
+          std::thread::spawn(move ||{
+              let rt = Runtime::new().expect("can't create runtime");
+              rt.block_on(async {      
+              let mut i:u64 = 0;
               loop {
                   sleep(Duration::from_secs(2)).await;
                   let res = sender.send(TorrentCmd::Tick(i)).await;
@@ -78,13 +86,15 @@ impl CommandProcessor {
                   }
                   i += 1;
               }
-          });
+          })});
 
-          rt.spawn(async move {
+          std::thread::spawn(move ||{
+              let rt = Runtime::new().expect("can't create runtime");
+          rt.block_on(async move {
               let client = TransmissionClient::new(transmission_url);
               let response = client.get_all_torrents(&TORRENT_INFO_FIELDS).await.expect("oops1");
               let ts = response.get("arguments").unwrap().get("torrents").unwrap().to_owned(); 
-              update_sender.send(TorrentUpdate::Full(ts)).await.expect("blah");
+              update_sender.send(TorrentUpdate::Full(ts)).expect("blah");
               loop { // should move into async
             let cmd = receiver.recv().await.expect("probably ticker thread panicked");
 
@@ -92,7 +102,7 @@ impl CommandProcessor {
                 TorrentCmd::GetDetails(id) => {
                   let details = client.get_torrent_details(vec![id]).await.expect("oops3"); // TODO: what if id is wrong?
                   if details.arguments.torrents.len() > 0 {
-                      let res = update_sender.send(TorrentUpdate::Details(details.arguments.torrents[0].to_owned())).await;
+                      let res = update_sender.send(TorrentUpdate::Details(details.arguments.torrents[0].to_owned()));
                       if res.is_err() {
                           println!("{:#?}", res.err().unwrap());
                       }
@@ -105,16 +115,16 @@ impl CommandProcessor {
 //                println!("Received {} torrents", torrents.as_array().unwrap().len());
                 //let num_torrents = torrents.as_array().unwrap().len();
                 //if num_torrents < 100 { 
-                  update_sender.send(TorrentUpdate::Partial(torrents, removed, i)).await.expect("blah");
+                  update_sender.send(TorrentUpdate::Partial(torrents, removed, i)).expect("blah");
                 //}
 
                 if i % 3 == 0 {
                   let stats = client.get_session_stats().await.expect("boo");
-                  update_sender.send(TorrentUpdate::Stats(stats.arguments)).await.expect("foo");
+                  update_sender.send(TorrentUpdate::Stats(stats.arguments)).expect("foo");
                 }
                 if i % 60 == 0 {
                   let free_space = client.get_free_space("/var/lib/transmission/Downloads").await.expect("brkjf");
-                  update_sender.send(TorrentUpdate::FreeSpace(free_space.arguments)).await.expect("foo");
+                  update_sender.send(TorrentUpdate::FreeSpace(free_space.arguments)).expect("foo");
                 }
                 },
                 TorrentCmd::OpenDlDir(id) => {
@@ -224,13 +234,12 @@ impl CommandProcessor {
                     }
                     println!("{:?}", res);
                 },
-            TorrentCmd::PoisonPill() => {
-            }
+//            TorrentCmd::PoisonPill() => {}
             }
 
                   
           }
-          });
+          })});
 
 
           

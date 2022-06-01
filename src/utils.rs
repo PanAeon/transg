@@ -1,6 +1,9 @@
 //use std::fmt;
+use gtk::prelude::*;
 use transg::transmission;
+use crate::objects::{TorrentInfo, TorrentDetailsObject}; 
 use chrono::{UTC, NaiveDateTime, DateTime};
+
 
 #[derive(Debug, Clone)]
 pub struct Node {
@@ -108,3 +111,60 @@ pub fn build_tree(files: &Vec<transmission::File> ) -> Vec<Node> {
 }
 
 
+pub fn update_torrent_details(obj:TorrentDetailsObject, details: &transmission::TorrentDetails) {
+            obj.set_property("id", details.id.to_value());
+            obj.set_property("name", details.name.to_value());
+            obj.set_property("eta", details.eta.to_value());
+            obj.set_property("size-when-done", details.size_when_done.to_value());
+            obj.set_property("seeder-count", details.seeder_count.to_value());
+            obj.set_property("leecher-count", details.leecher_count.to_value());
+            obj.set_property("status", details.status.to_value());
+            obj.set_property("download-dir", details.download_dir.to_value());
+            obj.set_property("comment", details.comment.to_value());
+            obj.set_property("hash-string", details.hash_string.to_value());
+            obj.set_property("rate-download", details.rate_download.to_value());
+            obj.set_property("rate-upload", details.rate_upload.to_value());
+            obj.set_property("upload-ratio", details.upload_ratio.to_value());
+            obj.set_property("seed-ratio-limit", details.seed_ratio_limit.to_value());
+            obj.set_property("priority", details.priority.to_value());
+            obj.set_property("done-date", details.done_date.to_value());
+            obj.set_property("percent-complete", details.percent_complete.to_value());
+            obj.set_property("downloaded-ever", details.downloaded_ever.to_value());
+            obj.set_property("uploaded-ever", details.uploaded_ever.to_value());
+            obj.set_property("corrupt-ever", details.corrupt_ever.to_value());
+//            obj.set_property("labels", details.labels.to_value());
+            obj.set_property("piece-count", details.piece_count.to_value());
+            obj.set_property("pieces", details.pieces.to_value());
+            obj.set_property("error", details.error.to_value());
+            obj.set_property("error-string", details.error_string.to_value());
+}
+
+pub fn json_value_to_torrent_info(json: &serde_json::Value) -> TorrentInfo {
+    let xs = json.as_array().unwrap(); 
+    if xs.len() < 20 {
+        println!("js array too short");
+        std::process::exit(-1);
+    }
+                  TorrentInfo::new(
+                      xs[0].as_i64().unwrap(),
+                      xs[1].as_str().unwrap().to_string(),
+                      xs[2].as_i64().unwrap(),
+                      xs[3].as_f64().unwrap(),
+                      xs[4].as_i64().unwrap(),
+                      xs[5].as_str().unwrap().to_string(),
+                      xs[6].as_i64().unwrap(),
+                      xs[7].as_i64().unwrap(),
+                      xs[8].as_bool().unwrap(),
+                      xs[9].as_bool().unwrap(),
+                      xs[10].as_f64().unwrap(),
+                      xs[11].as_i64().unwrap(),
+                      xs[12].as_i64().unwrap(),
+                      xs[13].as_i64().unwrap(),
+                      xs[14].as_f64().unwrap(),
+                      xs[15].as_i64().unwrap(),
+                      xs[16].as_str().unwrap().to_string(),
+                      xs[17].as_i64().unwrap(),
+                      xs[18].as_f64().unwrap(),
+                      xs[19].as_i64().unwrap()
+                      )
+}
