@@ -1,36 +1,46 @@
-
 // now our time haz come, my fellow brothers!
 // should have written that fucking macro..
 fn main() {
     let class_name = "PeerObject";
     // rust name, rust type
     let fields = vec![
-  ("address", "String"),
-  ("client_name", "String"),
-  ("progress", "f64"),
-  ("rate_to_client", "u64"),
-  ("rate_to_peer", "u64"),
-  ("flag_str", "String"),
+        ("address", "String"),
+        ("client_name", "String"),
+        ("progress", "f64"),
+        ("rate_to_client", "u64"),
+        ("rate_to_peer", "u64"),
+        ("flag_str", "String"),
     ];
 
+    let constructor_params = fields
+        .iter()
+        .map(|f| {
+            let (name, _t) = f;
+            format!("{}: &{},", name, _t)
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
 
-    let constructor_params = fields.iter().map(|f| {
-      let (name, _t) = f; 
-      format!("{}: &{},", name, _t)
-    }).collect::<Vec<String>>().join("\n");
+    let constructor_tuples = fields
+        .iter()
+        .map(|f| {
+            let (name, _) = f;
+            format!("(\"{}\", &{}),", name.replace("_", "-"), name)
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
 
-    let constructor_tuples = fields.iter().map(|f| {
-      let (name, _) = f; 
-      format!("(\"{}\", &{}),", name.replace("_", "-"), name)
-    }).collect::<Vec<String>>().join("\n");
-
-    let struct_fields = fields.iter().map(|(name, type_)| {
-      let type_ = match *type_ {
-        x@("u64" | "u8" | "f64" | "i8" | "bool" | "i64") => format!("Cell<{}>", x), 
-        other  => format!("RefCell<{}>", other)
-      };
-      format!("{}: {},", name, type_)
-    }).collect::<Vec<String>>().join("\n");
+    let struct_fields = fields
+        .iter()
+        .map(|(name, type_)| {
+            let type_ = match *type_ {
+                x @ ("u64" | "u8" | "f64" | "i8" | "bool" | "i64") => format!("Cell<{}>", x),
+                other => format!("RefCell<{}>", other),
+            };
+            format!("{}: {},", name, type_)
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
 
     let properties = fields.iter().map(|(name, type_)| {
       let name = name.replace("_", "-");
@@ -46,23 +56,34 @@ fn main() {
         other  => format!("ParamSpec::new_object( \"{name}\", \"{name}\", \"{name}\", {other}::static_type(), ParamFlags::READWRITE,),"),
       }
     }).collect::<Vec<String>>().join("\n");
-    
-    let set_property = fields.iter().map(|(name, type_)| {
-      let gname = name.replace("_", "-");
-      format!("\"{gname}\" =>  self.{name}.replace(value.get().expect(\"The value needs to be of type `{type_}`.\")),") 
-    }).collect::<Vec<String>>().join("\n");
 
-                
+    let set_property = fields
+        .iter()
+        .map(|(name, type_)| {
+            let gname = name.replace("_", "-");
+            format!(
+                "\"{gname}\" =>  self.{name}.replace(value.get().expect(\"The value needs to be of type `{type_}`.\")),"
+            )
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
 
-    let get_property = fields.iter().map(|(name, type_)| {
-      let gname = name.replace("_", "-");
-      match *type_ {
-        "u64" | "u8" | "f64" | "i8" | "bool" | "i64" => format!("\"{gname}\" => self.{name}.get().to_value(),"), 
-        _  => format!("\"{gname}\" => self.{name}.borrow().to_value(),"), 
-      }
-    }).collect::<Vec<String>>().join("\n");
+    let get_property = fields
+        .iter()
+        .map(|(name, type_)| {
+            let gname = name.replace("_", "-");
+            match *type_ {
+                "u64" | "u8" | "f64" | "i8" | "bool" | "i64" => {
+                    format!("\"{gname}\" => self.{name}.get().to_value(),")
+                }
+                _ => format!("\"{gname}\" => self.{name}.borrow().to_value(),"),
+            }
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
 
-    let res = format!(r#"
+    let res = format!(
+        r#"
 use glib::Object;
 use gtk::glib;
 use glib::{{ParamFlags, ParamSpec, ParamSpecInt64, ParamSpecUInt64, Value}};
@@ -126,76 +147,77 @@ mod imp {{
             }}
         }}
     }}
-}}"#);
-  println!("{}", res);
+}}"#
+    );
+    println!("{}", res);
 }
-/* 
-   TorrentDetailsObject
+/*
+  TorrentDetailsObject
 
-    let fields = vec![
-    ( "id", "u64"),
-    ( "name", "String"),
-    ( "eta", "i64"),
-    ( "size_when_done", "u64"),
-    ( "seeder_count", "i64"),
-    ( "leecher_count", "i64"),
-    ( "status", "u64"),
-    ( "download_dir", "String"),
-    ( "comment", "String"),
-    ( "hash_string", "String"),
-    ( "rate_download", "u64"),
-    ( "rate_upload", "u64"),
-    ( "upload_ratio", "f64"),
-    ( "seed_ratio_limit", "u64"),
-    ( "priority", "u64"),
-    ( "done_date", "u64"),
-    ( "percent_complete", "f64"),
-    ( "downloaded_ever", "u64"),
-    ( "uploaded_ever", "u64"),
-    ( "corrupt_ever", "u64"),
-    ( "labels", "Vec<String>"),
-    ( "piece_count", "u64"),
-    ( "pieces", "String"), // base64 encoded bitstring
-    ( "files", "Vec<File>"),
-    ( "file_stats", "Vec<FileStats>"),
-    ( "priorities", "Vec<u8>"),
-    ( "wanted", "Vec<u8>"),
-    ( "peers", "Vec<Peer>"),
-    ( "trackers", "Vec<Tracker>"),
-    ( "tracker_stats", "Vec<TrackerStat>"),
-    ];
+   let fields = vec![
+   ( "id", "u64"),
+   ( "name", "String"),
+   ( "eta", "i64"),
+   ( "size_when_done", "u64"),
+   ( "seeder_count", "i64"),
+   ( "leecher_count", "i64"),
+   ( "status", "u64"),
+   ( "download_dir", "String"),
+   ( "comment", "String"),
+   ( "hash_string", "String"),
+   ( "rate_download", "u64"),
+   ( "rate_upload", "u64"),
+   ( "upload_ratio", "f64"),
+   ( "seed_ratio_limit", "u64"),
+   ( "priority", "u64"),
+   ( "done_date", "u64"),
+   ( "percent_complete", "f64"),
+   ( "downloaded_ever", "u64"),
+   ( "uploaded_ever", "u64"),
+   ( "corrupt_ever", "u64"),
+   ( "labels", "Vec<String>"),
+   ( "piece_count", "u64"),
+   ( "pieces", "String"), // base64 encoded bitstring
+   ( "files", "Vec<File>"),
+   ( "file_stats", "Vec<FileStats>"),
+   ( "priorities", "Vec<u8>"),
+   ( "wanted", "Vec<u8>"),
+   ( "peers", "Vec<Peer>"),
+   ( "trackers", "Vec<Tracker>"),
+   ( "tracker_stats", "Vec<TrackerStat>"),
+   ];
 
-    let class_name = "TrackerObject";
-    // rust name, rust type
-    let fields = vec![
+   let class_name = "TrackerObject";
+   // rust name, rust type
+   let fields = vec![
+("id", "u64"),
+("announce", "String"),
+("scrape", "String"),
+("tier", "u64"),
+
+   let class_name = "TrackerStatsObject";
+   // rust name, rust type
+   let fields = vec![
+ ("leecher_count", "i64"),
  ("id", "u64"),
- ("announce", "String"),
+ ("host", "String"),
  ("scrape", "String"),
- ("tier", "u64"),
+ ("seeder_count", "i64"),
+ ("last_announce_peer_count", "u64"),
+ ("last_announce_result", "String"),
+ ("last_announce_time", "u64"),
+   ];
 
-    let class_name = "TrackerStatsObject";
-    // rust name, rust type
-    let fields = vec![
-  ("leecher_count", "i64"),
-  ("id", "u64"),
-  ("host", "String"),
-  ("scrape", "String"),
-  ("seeder_count", "i64"),
-  ("last_announce_peer_count", "u64"),
-  ("last_announce_result", "String"),
-  ("last_announce_time", "u64"),
-    ];
-
-    let class_name = "FileStatsObject";
-    // rust name, rust type
-    let fields = vec![
-  ("wanted", "bool"),
-  ("priority", "u64"),
-  ("bytes_completed", "u64"),
-    ];
-    let class_name = "FileObject";
-    // rust name, rust type
-    let fields = vec![
-    ("name", "String"),
-    ("length", "u64"),
-    */
+   let class_name = "FileStatsObject";
+   // rust name, rust type
+   let fields = vec![
+ ("wanted", "bool"),
+ ("priority", "u64"),
+ ("bytes_completed", "u64"),
+   ];
+   let class_name = "FileObject";
+   // rust name, rust type
+   let fields = vec![
+   ("name", "String"),
+   ("length", "u64"),
+   */
