@@ -1,0 +1,3 @@
+[submodule "libtorrent-sys"]
+	path = libtorrent-sys
+	url = git@github.com:PanAeon/libtorrent-sys.git
