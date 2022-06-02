@@ -7,6 +7,8 @@ use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
+use crate::notification_utils::notify;
+use crate::config::Config;
 
 #[derive(Debug)]
 pub enum TorrentUpdate {
@@ -90,35 +92,42 @@ impl CommandProcessor {
     //    self.sender.blocking_send(TorrentCmd::PoisonPill()).expect("can't stop..");
     //}
     //
-    pub fn run(&mut self, transmission_url: &'static str) {
+    pub fn run(&mut self, config: &Config, ping: bool, notify_on_add: bool) {
         let sender = self.sender.clone();
 
         let update_sender = self.update_sender.clone();
         let _receiver = std::mem::replace(&mut self.receiver, None);
         let mut receiver = _receiver.unwrap();
 
-        std::thread::spawn(move || {
-            let rt = Runtime::new().expect("can't create runtime");
-            rt.block_on(async {
-                let mut i: u64 = 0;
-                loop {
-                    sleep(Duration::from_secs(2)).await;
-                    let res = sender.send(TorrentCmd::Tick(i)).await;
-                    if res.is_err() {
-                        return;
+        if ping {
+            std::thread::spawn(move || {
+                let rt = Runtime::new().expect("can't create runtime");
+                rt.block_on(async {
+                    let mut i: u64 = 0;
+                    loop {
+                        sleep(Duration::from_secs(2)).await;
+                        let res = sender.send(TorrentCmd::Tick(i)).await;
+                        if res.is_err() {
+                            return;
+                        }
+                        i += 1;
                     }
-                    i += 1;
-                }
-            })
-        });
+                })
+            });
+        }
 
+        let transmission_url = config.connection_string.to_string();
+        let remote_base_dir = config.remote_base_dir.to_string();
+        let local_base_dir = config.local_base_dir.to_string();
         std::thread::spawn(move || {
             let rt = Runtime::new().expect("can't create runtime");
             rt.block_on(async move {
-                let client = TransmissionClient::new(transmission_url);
-                let response = client.get_all_torrents(&TORRENT_INFO_FIELDS).await.expect("oops1");
-                let ts = response.get("arguments").unwrap().get("torrents").unwrap().to_owned();
-                update_sender.send(TorrentUpdate::Full(ts)).expect("blah");
+                let client = TransmissionClient::new(&transmission_url);
+                if ping {
+                    let response = client.get_all_torrents(&TORRENT_INFO_FIELDS).await.expect("oops1");
+                    let ts = response.get("arguments").unwrap().get("torrents").unwrap().to_owned();
+                    update_sender.send(TorrentUpdate::Full(ts)).expect("blah");
+                }
                 loop {
                     // should move into async
                     let cmd = receiver.recv().await.expect("probably ticker thread panicked");
@@ -152,7 +161,7 @@ impl CommandProcessor {
                             }
                             if i % 60 == 0 {
                                 let free_space = client
-                                    .get_free_space("/var/lib/transmission/Downloads")
+                                    .get_free_space(&remote_base_dir)
                                     .await
                                     .expect("brkjf");
                                 update_sender
@@ -165,17 +174,17 @@ impl CommandProcessor {
                             if details.arguments.torrents.len() > 0 {
                                 let location = details.arguments.torrents[0].download_dir.clone();
                                 let my_loc = location
-                                    .replace("/var/lib/transmission/Downloads", "/run/mount/transmission/Downloads");
+                                    .replace(&remote_base_dir, &local_base_dir);
                                 let me_loc2 = my_loc.clone();
                                 let tree = build_tree(&details.arguments.torrents[0].files);
                                 let p = my_loc + "/" + &tree[0].path;
                                 if tree.len() == 1 && fs::read_dir(&p).is_ok() {
-                                    std::process::Command::new("/home/vitalii/.nix-profile/bin/nautilus")
+                                    std::process::Command::new("nautilus")
                                         .arg(p)
                                         .spawn()
                                         .expect("failed to spawn");
                                 } else {
-                                    std::process::Command::new("/home/vitalii/.nix-profile/bin/nautilus")
+                                    std::process::Command::new("nautilus")
                                         .arg(me_loc2)
                                         .spawn()
                                         .expect("failed to spawn");
@@ -188,18 +197,18 @@ impl CommandProcessor {
                             if details.arguments.torrents.len() > 0 {
                                 let location = details.arguments.torrents[0].download_dir.clone();
                                 let my_loc = location
-                                    .replace("/var/lib/transmission/Downloads", "/run/mount/transmission/Downloads");
+                                    .replace(&remote_base_dir, &local_base_dir);
                                 let me_loc2 = my_loc.clone();
                                 let tree = build_tree(&details.arguments.torrents[0].files);
                                 let p = my_loc + "/" + &tree[0].path;
                                 if tree.len() == 1 && fs::read_dir(&p).is_ok() {
-                                    std::process::Command::new("/home/vitalii/.nix-profile/bin/alacritty")
+                                    std::process::Command::new("alacritty")
                                         .arg("--working-directory")
                                         .arg(&p)
                                         .spawn()
                                         .expect("failed to spawn");
                                 } else {
-                                    std::process::Command::new("/home/vitalii/.nix-profile/bin/alacritty")
+                                    std::process::Command::new("alacritty")
                                         .arg("--working-directory")
                                         .arg(&me_loc2)
                                         .spawn()
@@ -270,13 +279,19 @@ impl CommandProcessor {
                                 .unwrap()
                                 .to_string();
                             if result == "success" {
-                                //  TODO: use gtk notifications
+                                if notify_on_add {
+                                   let _ = notify("Torrent Added!", "").await; // TODO: add name
+                                }
                                 //    let _ =  notify("Torrent Added!", "").await; // TODO: add name
                             } else {
-                                //   let _ = notify("Error!", "").await;
+                                if notify_on_add {
+                                  let _ = notify("Error!", "").await;
+                                } else {
+                                    // FIXME: add gtk notification
+                                }
                                 println!("{:?}", res);
                             }
-                            println!("{:?}", res);
+                            //println!("{:?}", res);
                         } //            TorrentCmd::PoisonPill() => {}
                     }
                 }

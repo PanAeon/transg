@@ -7,11 +7,13 @@ mod objects;
 mod torrent_details_grid;
 mod torrent_stats;
 mod utils;
+mod config;
 use crate::create_torrent_dialog::add_torrent_dialog;
 use crate::file_table::{build_bottom_files, create_file_model};
 use crate::objects::{CategoryObject, FileObject, PeerObject, Stats, TorrentDetailsObject, TorrentInfo, TrackerObject};
 use crate::torrent_details_grid::TorrentDetailsGrid;
 use transg::transmission;
+use config::{get_or_create_config, DirMapping};
 
 use glib::clone;
 use gtk::gio;
@@ -53,6 +55,7 @@ fn main() {
 }
 
 fn build_ui(app: &Application) {
+    let config = get_or_create_config();
     let model = gio::ListStore::new(TorrentInfo::static_type());
     let category_model = gio::ListStore::new(CategoryObject::static_type());
     let stats = Stats::new(0, 0, 0);
@@ -79,32 +82,7 @@ fn build_ui(app: &Application) {
         ],
     );
 
-    let details_object = TorrentDetailsObject::new(
-        &u64::MAX,
-        &"".to_string(),
-        &0,
-        &0,
-        &0,
-        &0,
-        &0,
-        &"".to_string(),
-        &"".to_string(),
-        &"".to_string(),
-        &0,
-        &0,
-        &0.0,
-        &0,
-        &0,
-        &0,
-        &0.0,
-        &0,
-        &0,
-        &0,
-        &0,
-        &"".to_string(),
-        &0,
-        &"".to_string(),
-    );
+    let details_object = TorrentDetailsObject::default();
 
     let peers_model = gio::ListStore::new(PeerObject::static_type());
     let tracker_model = gio::ListStore::new(TrackerObject::static_type());
@@ -116,49 +94,11 @@ fn build_ui(app: &Application) {
     window.set_title(Some("Transgression"));
 
     let css_provider = gtk::CssProvider::new();
-    css_provider.load_from_data(
-        r#"
-    window {
-      font-size: 14px;
-      border-radius: 0;
-	  box-shadow: none;
-    }
-    decoration {
-	box-shadow: none;
-}
-
-decoration:backdrop {
-	box-shadow: none;
-}
-    .sidebar-category-name {
-      font-size: 14px;
-    }
-    .sidebar-category-count {
-      font-size: 14px;
-      margin-right: 12px;
-    }
-    .details-label {
-      font-weight: bold;
-    }
-    .simple-dialog > .dialog-vbox {
-      padding: 10px 20px 20px 10px;
-      background-color: @theme_bg_color;
-    }
-    .sidebar > row {
-        margin-top: 4px;
-        margin-left: 8px;
-        margin-right: 16px;
-    }
-/*    progressbar.horizontal > trough, progress {
-      min-width: 40px;
-    } */
-     "#
-        .as_bytes(),
-    );
+    css_provider.load_from_resource("/org/transgression/ui.css");
     gtk::StyleContext::add_provider_for_display(
         &gtk::gdk::Display::default().unwrap(),
         &css_provider,
-        gtk::STYLE_PROVIDER_PRIORITY_USER,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
 
     let header_bar = gtk::HeaderBar::new();
@@ -452,7 +392,7 @@ decoration:backdrop {
            Continue(true)
         ));
 
-    processor.run("http://192.168.1.217:9091/transmission/rpc");
+    processor.run(&config, true, false);
 
     let name_factory = gtk::SignalListItemFactory::new();
     name_factory.connect_setup(move |_, list_item| {
@@ -773,11 +713,6 @@ decoration:backdrop {
             }))
             .bind(&folder_icon, "icon-name", gtk::Widget::NONE);
 
-        //        list_item
-        //            .property_expression("item")
-        //            .chain_property::<CategoryObject>("is-folder")
-        //            .bind(&folder_icon, "visible", gtk::Widget::NONE);
-
         list_item
             .property_expression("item")
             .chain_property::<CategoryObject>("status")
@@ -806,11 +741,6 @@ decoration:backdrop {
             .property_expression("item")
             .chain_property::<CategoryObject>("name")
             .bind(&name_label, "label", gtk::Widget::NONE);
-
-        //        list_item
-        //            .property_expression("item")
-        //            .chain_property::<CategoryObject>("is-folder")
-        //            .bind(&separator, "visible", gtk::Widget::NONE);
     });
 
     let category_selection_model = gtk::SingleSelection::new(Some(&category_model));
@@ -1052,13 +982,14 @@ decoration:backdrop {
 
     let _category_model = Rc::new(category_model);
     let _category_filter = Rc::new(category_filter);
+    let _dirs = Rc::new(config.directories);
     let sender = tx2.clone();
-    add_button.connect_clicked(clone!(@strong _window, @strong _category_filter => move |_| {
-            gtk::glib::MainContext::default().spawn_local(add_torrent_file_dialog(Rc::clone(&_window), sender.clone(), Rc::clone(&_category_filter)));
+    add_button.connect_clicked(clone!(@strong _window, @strong _dirs, @strong _category_filter => move |_| {
+            gtk::glib::MainContext::default().spawn_local(add_torrent_file_dialog(Rc::clone(&_window), sender.clone(), Rc::clone(&_category_filter), Rc::clone(&_dirs)));
     }));
     let sender = tx2.clone();
-    add_magnet_button.connect_clicked(clone!(@strong _window, @strong _category_filter => move |_| {
-            gtk::glib::MainContext::default().spawn_local(add_magnet_dialog(Rc::clone(&_window), sender.clone(), Rc::clone(&_category_filter)));
+    add_magnet_button.connect_clicked(clone!(@strong _window, @strong _dirs, @strong _category_filter => move |_| {
+            gtk::glib::MainContext::default().spawn_local(add_magnet_dialog(Rc::clone(&_window), sender.clone(), Rc::clone(&_category_filter), Rc::clone(&_dirs)));
     }));
     let sender = tx2.clone();
     action_move_torrent.connect_activate(clone!(@strong _window, @strong _category_filter, @strong _category_model, @weak torrent_selection_model => move |_action, _| {
@@ -1458,6 +1389,7 @@ async fn add_torrent_file_dialog<W: IsA<gtk::Window>>(
     _window: Rc<W>,
     sender: mpsc::Sender<TorrentCmd>,
     filter: Rc<gtk::CustomFilter>,
+    dir_mapping: Rc<Vec<DirMapping>>
 ) {
     let dialog = gtk::FileChooserDialog::new(
         Some("Select .torrent file"),
@@ -1479,6 +1411,7 @@ async fn add_torrent_file_dialog<W: IsA<gtk::Window>>(
                     None,
                     Some(path),
                     filter,
+                    Rc::clone(&dir_mapping)
                 ));
             }
         }
@@ -1489,6 +1422,7 @@ async fn add_magnet_dialog<W: IsA<gtk::Window>>(
     _window: Rc<W>,
     sender: mpsc::Sender<TorrentCmd>,
     filter: Rc<gtk::CustomFilter>,
+    dir_mapping: Rc<Vec<DirMapping>>
 ) {
     let dialog = gtk::Dialog::builder().transient_for(&*_window).modal(true).build();
 
@@ -1528,6 +1462,7 @@ async fn add_magnet_dialog<W: IsA<gtk::Window>>(
                 Some(s),
                 None,
                 filter,
+                Rc::clone(&dir_mapping)
             ));
         }
     }

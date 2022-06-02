@@ -1,4 +1,5 @@
 use crate::build_bottom_files;
+use crate::config::DirMapping;
 use crate::create_file_model;
 use crate::magnet_tools::magnet_to_metainfo;
 use crate::transmission;
@@ -22,16 +23,12 @@ pub fn add_torrent_dialog2(
     magnet_data: Rc<RefCell<Option<Vec<u8>>>>,
     destination: &gtk::DropDown,
     start_paused_checkbox: &gtk::CheckButton,
+    dir_mapping: &Vec<DirMapping>
 ) {
     use lava_torrent::torrent::v1::Torrent;
 
-    let model = gtk::StringList::new(&vec![
-        "/var/lib/transmission/Downloads/films",
-        "/var/lib/transmission/Downloads/games",
-        "/var/lib/transmission/Downloads/music",
-        "/var/lib/transmission/Downloads/lessons",
-        "/var/lib/transmission/Downloads/blues",
-    ]);
+    let folders : Vec<&str> = dir_mapping.iter().map(|x| x.remote_path.as_str()).collect();
+    let model = gtk::StringList::new(&folders);
     destination.set_model(Some(&model));
 
     //  let vbox = gtk::Box::new(gtk::Orientation::Vertical, 4);
@@ -43,6 +40,7 @@ pub fn add_torrent_dialog2(
     file_hbox.append(&l);
 
     let file_chooser = gtk::Button::new();
+    //file_chooser.set_has_frame(false);
     file_hbox.append(&file_chooser);
 
     let hbox = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -180,6 +178,7 @@ pub async fn add_torrent_dialog<W: IsA<gtk::Window>>(
     magnet_url: Option<String>,
     torrent_file: Option<PathBuf>,
     filter: Rc<gtk::CustomFilter>,
+    dir_mapping: Rc<Vec<DirMapping>>
 ) {
     let vbox = gtk::Box::new(gtk::Orientation::Vertical, 4);
     let _cancel_fetch = Rc::new(Cell::new(false));
@@ -204,6 +203,7 @@ pub async fn add_torrent_dialog<W: IsA<gtk::Window>>(
         magnet_data.clone(),
         &destination,
         &start_paused_checkbox,
+        &dir_mapping
     );
     let response = dialog.run_future().await;
     dialog.close();

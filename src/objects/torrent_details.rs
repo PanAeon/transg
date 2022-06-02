@@ -1,4 +1,3 @@
-use crate::transmission::TorrentDetails;
 use glib::Object;
 use gtk::glib;
 
@@ -80,8 +79,8 @@ impl TorrentDetailsObject {
 impl Default for TorrentDetailsObject {
     fn default() -> Self {
         Self::new(
-            &0,
-            &String::from("shit"),
+            &u64::MAX,
+            &String::from(""),
             &0,
             &0,
             &0,
