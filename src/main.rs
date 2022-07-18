@@ -1,27 +1,29 @@
 mod command_processor;
+mod config;
 mod create_torrent_dialog;
 mod file_table;
 mod magnet_tools;
 mod notification_utils;
 mod objects;
+mod preferences_window;
 mod torrent_details_grid;
 mod torrent_stats;
 mod utils;
-mod config;
 use crate::create_torrent_dialog::add_torrent_dialog;
 use crate::file_table::{build_bottom_files, create_file_model};
 use crate::objects::{CategoryObject, FileObject, PeerObject, Stats, TorrentDetailsObject, TorrentInfo, TrackerObject};
 use crate::torrent_details_grid::TorrentDetailsGrid;
+use config::{get_or_create_config, Config};
 use transg::transmission;
-use config::{get_or_create_config, DirMapping};
 
 use glib::clone;
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::Application;
+use preferences_window::preferences_dialog;
 use utils::{format_time, json_value_to_torrent_info, update_torrent_details};
-//use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use std::cell::RefCell;
 use std::rc::Rc;
 //use std::sync::mpsc::{Sender, Receiver};
@@ -49,16 +51,19 @@ fn main() {
 
     let app = gtk::Application::new(Some("org.transgression.Transgression"), Default::default());
 
+    //app.connect_startup(|_| {
+    //});
+
     app.connect_activate(build_ui);
 
     app.run();
 }
 
 fn build_ui(app: &Application) {
-    let config = get_or_create_config();
+    let config = Arc::new(Mutex::new(get_or_create_config()));
     let model = gio::ListStore::new(TorrentInfo::static_type());
     let category_model = gio::ListStore::new(CategoryObject::static_type());
-    let stats = Stats::new(0, 0, 0);
+    let stats = Stats::new(0, 0, 0, 0.0);
     category_model.splice(
         0,
         0,
@@ -102,11 +107,12 @@ fn build_ui(app: &Application) {
     );
 
     let header_bar = gtk::HeaderBar::new();
+    header_bar.set_hexpand_set(true);
     window.set_titlebar(Some(&header_bar));
 
     //    let menu_button = gtk::MenuButton::new();
     //    menu_button.set_icon_name("open-menu-symbolic");
-    let settings_button = gtk::ToggleButton::new();
+    let settings_button = gtk::Button::new();
     settings_button.set_icon_name("emblem-system-symbolic");
     header_bar.pack_end(&settings_button);
 
@@ -120,7 +126,7 @@ fn build_ui(app: &Application) {
     header_bar.pack_end(&search_button);
 
     let sort_button = gtk::Button::new();
-    sort_button.set_icon_name("view-list-symbolic");
+    sort_button.set_icon_name("pan-down-symbolic");
     header_bar.pack_end(&sort_button);
 
     let sort_popover = gtk::Popover::new();
@@ -128,7 +134,7 @@ fn build_ui(app: &Application) {
     let sort_label = gtk::Label::new(Some("Sort by"));
     let sort_by_date_added = gtk::CheckButton::builder().label("Date added").build();
     let sort_by_name = gtk::CheckButton::builder()
-        .label("Name")
+        .label("Name A-z")
         .group(&sort_by_date_added)
         .build();
     let sort_by_size = gtk::CheckButton::builder()
@@ -136,7 +142,7 @@ fn build_ui(app: &Application) {
         .group(&sort_by_date_added)
         .build();
     let sort_by_uploaded = gtk::CheckButton::builder()
-        .label("Uploaded bytes")
+        .label("Total uploaded")
         .group(&sort_by_date_added)
         .build();
     let sort_by_ratio = gtk::CheckButton::builder()
@@ -189,9 +195,6 @@ fn build_ui(app: &Application) {
     sort_box.append(&sort_by_uploaded);
     sort_box.append(&sort_by_ratio);
     sort_box.append(&sort_by_upload_speed);
-    sort_box.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-    let reverse_sort_order = gtk::CheckButton::builder().label("Reverse sort order").build();
-    sort_box.append(&reverse_sort_order);
     sort_popover.set_child(Some(&sort_box));
     //sort_popover.set_pointing_to(&sort_button);
     sort_popover.set_parent(&sort_button);
@@ -240,37 +243,11 @@ fn build_ui(app: &Application) {
     header_bar.pack_start(&remove_with_files_button);
     remove_with_files_button.set_action_name(Some("win.torrent-remove-with-data"));
 
-    let topstack = gtk::Stack::new();
     let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    topstack.add_named(&container, Some("main"));
-    let settings_hbox = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    let settings_sidebar = gtk::StackSidebar::new();
-    settings_hbox.append(&settings_sidebar);
-    let settings_stack = gtk::Stack::new();
-    settings_stack.set_transition_type(gtk::StackTransitionType::SlideUpDown);
-    settings_sidebar.set_stack(&settings_stack);
+    window.set_child(Some(&container));
+    //topstack.add_named(&container, Some("main"));
 
-    let l1 = gtk::Label::new(Some("l1"));
-    settings_stack.add_titled(&l1, None, "Connections");
-    let l2 = gtk::Label::new(Some("l1"));
-    settings_stack.add_titled(&l2, None, "General");
-    let l3 = gtk::Label::new(Some("l1"));
-    settings_stack.add_titled(&l3, None, "Actions");
-    let l4 = gtk::Label::new(Some("l2"));
-    settings_stack.add_titled(&l4, None, "Folders");
-
-    settings_hbox.append(&settings_stack);
-    topstack.add_named(&settings_hbox, Some("settings"));
-    topstack.set_visible_child_name("main");
-    window.set_child(Some(&topstack));
-
-    settings_button.connect_toggled(clone!(@weak topstack => move |button| {
-      if button.is_active() {
-         topstack.set_visible_child_name("settings");
-      } else {
-         topstack.set_visible_child_name("main");
-      }
-    }));
+    //    let preferences_window = preferences_window::build_preferences_window(&window);
 
     let (mut processor, rx) = CommandProcessor::create();
     let tx2 = processor.get_sender();
@@ -351,12 +328,15 @@ fn build_ui(app: &Application) {
                     stats.set_property("upload", s.upload_speed.to_value());
                     stats.set_property("download", s.download_speed.to_value());
                   },
+                  TorrentUpdate::ClientStats{ mem } => {
+                    stats.set_property("client-mem", mem);
+                  },
                   TorrentUpdate::FreeSpace(s) => {
                     stats.set_property("free-space", s.size_bytes.to_value());
                   },
                   TorrentUpdate::Details(details) => {
-            let previous_id = details_object.property_value("id").get::<u64>().unwrap();
-            update_torrent_details(details_object, &details);
+                    let previous_id = details_object.property_value("id").get::<u64>().unwrap();
+                    update_torrent_details(&details_object, &details);
 
             if previous_id != details.id {
               let stupid_model = create_file_model(&Rc::new(RefCell::new(utils::build_tree(&details.files))));
@@ -392,7 +372,7 @@ fn build_ui(app: &Application) {
            Continue(true)
         ));
 
-    processor.run(&config, true, false);
+    processor.run(config.clone(), true, false);
 
     let name_factory = gtk::SignalListItemFactory::new();
     name_factory.connect_setup(move |_, list_item| {
@@ -456,7 +436,11 @@ fn build_ui(app: &Application) {
 
     let num_peers_factory = gtk::SignalListItemFactory::new();
     num_peers_factory.connect_setup(label_setup::<TorrentInfo, i64, _>("peers-connected", |x| {
-        if x > 0 { format!("{}", x) } else { "".to_string() }
+        if x > 0 {
+            format!("{}", x)
+        } else {
+            "".to_string()
+        }
     }));
 
     let completion_factory = gtk::SignalListItemFactory::new();
@@ -588,6 +572,7 @@ fn build_ui(app: &Application) {
         .halign(gtk::Align::End)
         .valign(gtk::Align::End)
         .margin_end(20)
+        .margin_start(20)
         .build();
 
     let upload_line_label = gtk::Label::builder()
@@ -641,6 +626,27 @@ fn build_ui(app: &Application) {
             utils::format_size(i.try_into().unwrap())
         }))
         .bind(&free_space_value_label, "label", gtk::Widget::NONE);
+
+    let mem_label = gtk::Label::builder()
+        .label("")
+        .halign(gtk::Align::Start)
+        .valign(gtk::Align::Center)
+        .build();
+
+    // TODO: put to the right
+    stats
+        .property_expression("client-mem")
+        .chain_closure::<String>(gtk::glib::closure!(|_: Option<gtk::glib::Object>, i: f64| {
+            format!("Client mem: {:.2} MB  ", i / (1024.0 * 1024.0))
+        }))
+        .bind(&mem_label, "label", gtk::Widget::NONE);
+    let left_box = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    left_box.set_hexpand(true);
+    left_box.set_halign(gtk::Align::Start);
+    left_box.append(&mem_label);
+
+    status_line.append(&left_box);
+    // status_line.append(&mem_label);
     status_line.append(&upload_line_label);
     status_line.append(&upload_value_label);
     status_line.append(&download_line_label);
@@ -672,9 +678,9 @@ fn build_ui(app: &Application) {
         separator.set_margin_bottom(8);
 
         let name_label = gtk::Label::new(None);
-        name_label.set_css_classes(&["sidebar-category-name"]);
+        name_label.add_css_class("sidebar-category-name");
         let count_label = gtk::Label::new(None);
-        count_label.set_css_classes(&["sidebar-category-count"]);
+        count_label.add_css_class("sidebar-category-count");
         let folder_icon = gtk::Image::new();
         folder_icon.set_icon_name(Some("folder"));
         //        folder_icon.set_icon_size(gtk::IconSize::Large);
@@ -775,7 +781,7 @@ fn build_ui(app: &Application) {
     let category_view = gtk::ListView::new(Some(&category_selection_model), Some(&category_factory));
     category_view.set_vexpand(true);
     category_view.set_margin_top(8);
-    category_view.set_css_classes(&["sidebar"]);
+    category_view.add_css_class("sidebar");
 
     //    let controller = gtk::EventControllerKey::new();
     //   torrent_list.add_controller(&controller);
@@ -980,16 +986,19 @@ fn build_ui(app: &Application) {
 
     let _window = Rc::new(window);
 
+    settings_button.connect_clicked(clone!(@strong _window => move |_| {
+       gtk::glib::MainContext::default().spawn_local(preferences_dialog(Rc::clone(&_window)));
+    }));
+
     let _category_model = Rc::new(category_model);
     let _category_filter = Rc::new(category_filter);
-    let _dirs = Rc::new(config.directories);
     let sender = tx2.clone();
-    add_button.connect_clicked(clone!(@strong _window, @strong _dirs, @strong _category_filter => move |_| {
-            gtk::glib::MainContext::default().spawn_local(add_torrent_file_dialog(Rc::clone(&_window), sender.clone(), Rc::clone(&_category_filter), Rc::clone(&_dirs)));
+    add_button.connect_clicked(clone!(@strong _window, @strong config, @strong _category_filter => move |_| {
+            gtk::glib::MainContext::default().spawn_local(add_torrent_file_dialog(Rc::clone(&_window), sender.clone(), Rc::clone(&_category_filter), config.clone()));
     }));
     let sender = tx2.clone();
-    add_magnet_button.connect_clicked(clone!(@strong _window, @strong _dirs, @strong _category_filter => move |_| {
-            gtk::glib::MainContext::default().spawn_local(add_magnet_dialog(Rc::clone(&_window), sender.clone(), Rc::clone(&_category_filter), Rc::clone(&_dirs)));
+    add_magnet_button.connect_clicked(clone!(@strong _window, @strong config, @strong _category_filter => move |_| {
+            gtk::glib::MainContext::default().spawn_local(add_magnet_dialog(Rc::clone(&_window), sender.clone(), Rc::clone(&_category_filter), config.clone()));
     }));
     let sender = tx2.clone();
     action_move_torrent.connect_activate(clone!(@strong _window, @strong _category_filter, @strong _category_model, @weak torrent_selection_model => move |_action, _| {
@@ -1066,8 +1075,8 @@ fn build_ui(app: &Application) {
     // ========================================================================
 
     main_view.set_valign(gtk::Align::Fill);
-    main_view.set_start_child(&left_pane);
-    main_view.set_end_child(&right_hbox);
+    main_view.set_start_child(Some(&left_pane));
+    main_view.set_end_child(Some(&right_hbox));
     main_view.set_resize_end_child(true);
     main_view.set_resize_start_child(false);
     main_view.set_shrink_start_child(true);
@@ -1076,8 +1085,8 @@ fn build_ui(app: &Application) {
 
     container.append(&bottom_pane);
     container.append(&status_line);
-    bottom_pane.set_start_child(&main_view);
-    bottom_pane.set_end_child(&details_notebook);
+    bottom_pane.set_start_child(Some(&main_view));
+    bottom_pane.set_end_child(Some(&details_notebook));
     bottom_pane.set_resize_start_child(true);
     bottom_pane.set_resize_end_child(false);
     bottom_pane.set_shrink_end_child(true);
@@ -1311,7 +1320,7 @@ async fn move_torrent_dialog<W: IsA<gtk::Window>>(
     }
     let dialog = gtk::Dialog::builder().transient_for(&*window).modal(true).build();
 
-    dialog.set_css_classes(&["simple-dialog"]);
+    dialog.add_css_class("simple-dialog");
     dialog.add_button("Cancel", gtk::ResponseType::Cancel);
     dialog.add_button("Move", gtk::ResponseType::Ok);
 
@@ -1368,7 +1377,7 @@ async fn deletion_confiramtion_dialog<W: IsA<gtk::Window>>(
         .text(&msg)
         //        .use_markup(true)
         .build();
-    dialog.set_css_classes(&["simple-dialog"]);
+    dialog.add_css_class("simple-dialog");
 
     let response = dialog.run_future().await;
     dialog.close();
@@ -1389,7 +1398,7 @@ async fn add_torrent_file_dialog<W: IsA<gtk::Window>>(
     _window: Rc<W>,
     sender: mpsc::Sender<TorrentCmd>,
     filter: Rc<gtk::CustomFilter>,
-    dir_mapping: Rc<Vec<DirMapping>>
+    config: Arc<Mutex<Config>>,
 ) {
     let dialog = gtk::FileChooserDialog::new(
         Some("Select .torrent file"),
@@ -1411,7 +1420,7 @@ async fn add_torrent_file_dialog<W: IsA<gtk::Window>>(
                     None,
                     Some(path),
                     filter,
-                    Rc::clone(&dir_mapping)
+                    config.clone(),
                 ));
             }
         }
@@ -1422,7 +1431,7 @@ async fn add_magnet_dialog<W: IsA<gtk::Window>>(
     _window: Rc<W>,
     sender: mpsc::Sender<TorrentCmd>,
     filter: Rc<gtk::CustomFilter>,
-    dir_mapping: Rc<Vec<DirMapping>>
+    config: Arc<Mutex<Config>>,
 ) {
     let dialog = gtk::Dialog::builder().transient_for(&*_window).modal(true).build();
 
@@ -1435,7 +1444,7 @@ async fn add_magnet_dialog<W: IsA<gtk::Window>>(
     let text = gtk::Text::new();
     hbox.append(&text);
     dialog.content_area().append(&hbox);
-    dialog.set_css_classes(&["simple-dialog"]);
+    dialog.add_css_class("simple-dialog");
 
     let clipboard = gtk::gdk::Display::default()
         .expect("surely we must have display")
@@ -1462,7 +1471,7 @@ async fn add_magnet_dialog<W: IsA<gtk::Window>>(
                 Some(s),
                 None,
                 filter,
-                Rc::clone(&dir_mapping)
+                config.clone(),
             ));
         }
     }

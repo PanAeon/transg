@@ -1,8 +1,8 @@
 use crate::build_bottom_files;
-use crate::config::DirMapping;
 use crate::create_file_model;
 use crate::magnet_tools::magnet_to_metainfo;
 use crate::transmission;
+use crate::config::Config;
 use crate::utils::build_tree;
 use crate::TorrentCmd;
 use base64;
@@ -11,6 +11,8 @@ use magnet_url::Magnet;
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::Mutex;
 use tokio::sync::mpsc;
 use urlencoding;
 
@@ -23,11 +25,12 @@ pub fn add_torrent_dialog2(
     magnet_data: Rc<RefCell<Option<Vec<u8>>>>,
     destination: &gtk::DropDown,
     start_paused_checkbox: &gtk::CheckButton,
-    dir_mapping: &Vec<DirMapping>
+    config: Arc<Mutex<Config>>
 ) {
     use lava_torrent::torrent::v1::Torrent;
 
-    let folders : Vec<&str> = dir_mapping.iter().map(|x| x.remote_path.as_str()).collect();
+    let directories = config.lock().expect("").get_directories();
+    let folders : Vec<&str> = directories.iter().map(|x| x.remote_path.as_str()).collect();
     let model = gtk::StringList::new(&folders);
     destination.set_model(Some(&model));
 
@@ -148,10 +151,12 @@ pub async fn add_torrent_dialog3(
                 .send(TorrentCmd::AddTorrent(folder, None, Some(metainfo), start_paused))
                 .await
                 .expect("failure snd move");
-        } else if let Some(data) = &*magnet_data.borrow() {
-            let metainfo = base64::encode(data);
+        } else if let Some(_data) = &*magnet_data.borrow() {
+            // TODO: I'm sending magnet url, but should probably send correct data, but I need to
+            // repopulate some fields from magnet, as it looks
+            //let metainfo = base64::encode(data);
             sender
-                .send(TorrentCmd::AddTorrent(folder, None, Some(metainfo), start_paused))
+                .send(TorrentCmd::AddTorrent(folder, None, magnet_url, start_paused)) 
                 .await
                 .expect("failure snd move");
         } else if let Some(url) = magnet_url {
@@ -178,7 +183,7 @@ pub async fn add_torrent_dialog<W: IsA<gtk::Window>>(
     magnet_url: Option<String>,
     torrent_file: Option<PathBuf>,
     filter: Rc<gtk::CustomFilter>,
-    dir_mapping: Rc<Vec<DirMapping>>
+    config: Arc<Mutex<Config>>
 ) {
     let vbox = gtk::Box::new(gtk::Orientation::Vertical, 4);
     let _cancel_fetch = Rc::new(Cell::new(false));
@@ -193,7 +198,7 @@ pub async fn add_torrent_dialog<W: IsA<gtk::Window>>(
     dialog.add_button("Cancel", gtk::ResponseType::Cancel);
     dialog.add_button("Add", gtk::ResponseType::Ok);
 
-    dialog.set_css_classes(&["simple-dialog"]);
+    dialog.add_css_class("simple-dialog");
     add_torrent_dialog2(
         &vbox,
         &magnet_url,
@@ -203,7 +208,7 @@ pub async fn add_torrent_dialog<W: IsA<gtk::Window>>(
         magnet_data.clone(),
         &destination,
         &start_paused_checkbox,
-        &dir_mapping
+        config.clone()
     );
     let response = dialog.run_future().await;
     dialog.close();

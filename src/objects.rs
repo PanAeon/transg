@@ -8,6 +8,7 @@ mod status;
 mod torrent_details;
 mod torrent_info;
 mod tracker;
+mod blocks_widget;
 
 pub use self::category::CategoryObject;
 pub use self::file::FileObject;

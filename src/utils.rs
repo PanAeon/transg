@@ -13,9 +13,12 @@ pub struct Node {
     pub children: Vec<Node>,
 }
 
-const BYTES_TB: i64 = 1024 * 1024 * 1024 * 1024;
-const BYTES_GB: i64 = 1024 * 1024 * 1024;
-const BYTES_MB: i64 = 1024 * 1024;
+const DEC_TB: i64 = 1000 * 1000 * 1000 * 1000;
+const DEC_GB: i64 = 1000 * 1000 * 1000;
+const DEC_MB: i64 = 1000 * 1000;
+//const BYTES_TB: i64 = 1024 * 1024 * 1024 * 1024;
+//const BYTES_GB: i64 = 1024 * 1024 * 1024;
+//const BYTES_MB: i64 = 1024 * 1024;
 const F_BYTES_TB: f64 = 1024.0 * 1024.0 * 1024.0 * 1024.0;
 const F_BYTES_GB: f64 = 1024.0 * 1024.0 * 1024.0;
 const F_BYTES_MB: f64 = 1024.0 * 1024.0;
@@ -23,23 +26,23 @@ const F_BYTES_MB: f64 = 1024.0 * 1024.0;
 pub fn format_size(i: i64) -> String {
     if i == 0 {
         "".to_string()
-    } else if i > BYTES_TB {
-        format!("{:.2} Tib", i as f64 / F_BYTES_TB)
-    } else if i > BYTES_GB {
-        format!("{:.2} Gib", i as f64 / F_BYTES_GB)
-    } else if i > BYTES_MB {
-        format!("{:.2} Mib", i as f64 / F_BYTES_MB)
+    } else if i > DEC_TB {
+        format!("{:.2} Tb", i as f64 / F_BYTES_TB)
+    } else if i > DEC_GB {
+        format!("{:.2} Gb", i as f64 / F_BYTES_GB)
+    } else if i > DEC_MB {
+        format!("{:.2} Mb", i as f64 / F_BYTES_MB)
     } else {
-        format!("{:.2} Kib", i as f64 / 1024.0)
+        format!("{:.2} Kb", i as f64 / 1024.0)
     }
 }
 pub fn format_download_speed(i: i64) -> String {
     if i == 0 {
         "".to_string()
-    } else if i > BYTES_MB {
-        format!("{:.2} Mib/s", i as f64 / F_BYTES_MB)
+    } else if i > DEC_MB {
+        format!("{: >6.2} Mb/s", i as f64 / F_BYTES_MB)
     } else {
-        format!("{:.2} Kib/s", i as f64 / 1024.0)
+        format!("{: >6.2} Kb/s", i as f64 / 1024.0)
     }
 }
 
@@ -128,7 +131,7 @@ pub fn build_tree(files: &Vec<transmission::File>) -> Vec<Node> {
     do_build_tree("", 0, xs)
 }
 
-pub fn update_torrent_details(obj: TorrentDetailsObject, details: &transmission::TorrentDetails) {
+pub fn update_torrent_details(obj: &TorrentDetailsObject, details: &transmission::TorrentDetails) {
     obj.set_property("id", details.id.to_value());
     obj.set_property("name", details.name.to_value());
     obj.set_property("eta", details.eta.to_value());

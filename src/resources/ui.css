@@ -33,6 +33,15 @@ decoration:backdrop {
         margin-left: 8px;
         margin-right: 16px;
 }
+
+#preferences-window {
+  border: 0.5px solid #ccc;
+}
+#preferences-window > .dialog-vbox {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
 /*    progressbar.horizontal > trough, progress {
       min-width: 40px;
     } */

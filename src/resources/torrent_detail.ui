@@ -455,5 +455,15 @@
         </layout>
       </object>
     </child>
+    <child>
+      <object class="GtkDrawingArea" id="pieces">
+        <property name="halign">start</property>
+        <layout>
+          <property name="column">0</property>
+          <property name="row">10</property>
+          <property name="column-span">8</property>
+        </layout>
+      </object>
+    </child>
   </template>
 </interface>

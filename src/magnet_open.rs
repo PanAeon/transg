@@ -21,6 +21,7 @@ use gtk::Application;
 use std::cell::{Cell, RefCell};
 use std::env;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 fn main() {
     gio::resources_register_include!("transgression.gresource").expect("Failed to register resources.");
@@ -41,7 +42,7 @@ fn main() {
 }
 
 fn build_ui(app: &Application) {
-    let config = get_or_create_config();
+    let config = Arc::new(Mutex::new(get_or_create_config()));
     let args: Vec<String> = env::args().collect();
     let magnet_url: String = if args.len() != 2 {
         println!("Usage: transgression-open-magnet '<magnet-url>'");
@@ -63,13 +64,13 @@ fn build_ui(app: &Application) {
     );
     let (mut processor, _) = CommandProcessor::create();
     let sender = processor.get_sender();
-    processor.run(&config, false, true);
+    processor.run(config.clone(), false, true);
 
     window.set_title(Some("Transgression Open Magnet"));
 
     //   let sender = tx2.clone();
     let vbox = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    vbox.set_css_classes(&["dialog-container"]);
+    vbox.add_css_class("dialog-container");
 
     let _cancel_fetch = Rc::new(Cell::new(false));
     let _magnet_done = Rc::new(Cell::new(false));
@@ -86,7 +87,7 @@ fn build_ui(app: &Application) {
         magnet_data.clone(),
         &destination,
         &start_paused_checkbox,
-        &config.directories
+        config.clone()
     );
 
     let bottom_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -94,7 +95,7 @@ fn build_ui(app: &Application) {
     vbox.append(&bottom_box);
     let ok_button = gtk::Button::new();
     ok_button.set_label("Ok");
-    ok_button.set_css_classes(&["suggested-action"]);
+    ok_button.add_css_class("suggested-action");
     bottom_box.append(&ok_button);
     let cancel_button = gtk::Button::new();
     cancel_button.set_label("Cancel");

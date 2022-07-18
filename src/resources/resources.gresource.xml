@@ -6,6 +6,54 @@
     <file compressed="true" preprocess="xml-stripblanks">main_menu.ui</file>
     <file compressed="true" preprocess="xml-stripblanks">torrent_list_context_menu.ui</file>
     <file compressed="true">ui.css</file>
+      <file preprocess="xml-stripblanks">icons/arrow1-down-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/arrow1-left-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/arrow1-right-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/arrow1-up-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/columns-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/dialog-error-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/dialog-question-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/dialog-warning-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/dock-bottom-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/dock-left-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/edit-delete-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/emblem-shared-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/emblem-synchronizing-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/emblem-system-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/folder-new-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/folder-remote-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/folder-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/go-down-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/go-up-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/list-add-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/list-compact-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/list-remove-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/media-playback-pause-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/media-playback-start-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/media-playback-stop-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/network-idle-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/network-receive-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/network-server-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/network-transmit-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/network-wired-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/open-menu-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/pan-down-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/penguin-alt-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/preferences-desktop-keyboard-shortcuts-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/preferences-system-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/settings-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/skull-small-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/speedometer-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/speedometer2-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/speedometer3-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/speedometer4-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/spinner-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/system-run-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/system-search-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/utilities-terminal-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/view-list-bullet-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/view-refresh-symbolic.svg</file>
+  <file preprocess="xml-stripblanks">icons/window-restore-symbolic.svg</file>
   </gresource>
 </gresources>
 

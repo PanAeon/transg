@@ -20,12 +20,16 @@ mod imp {
     use crate::utils::{format_download_speed, format_eta, format_size};
     use glib::subclass::InitializingObject;
     use glib::{ParamFlags, ParamSpec, ParamSpecObject, Value};
-    use gtk::glib;
+    use gtk::{glib, DrawingArea};
     use gtk::prelude::*;
     use gtk::subclass::prelude::*;
     use gtk::{CompositeTemplate, Label};
     use once_cell::sync::Lazy;
     use std::cell::RefCell;
+    use glib::clone;
+    use gtk::prelude::*;
+    use gtk::glib::prelude::*;
+    use bit_vec::BitVec;
 
     #[derive(CompositeTemplate, Default)]
     #[template(resource = "/org/transgression/torrent_detail.ui")]
@@ -71,6 +75,8 @@ mod imp {
         pub completed_at: TemplateChild<Label>,
         #[template_child]
         pub error: TemplateChild<Label>,
+        #[template_child]
+        pub pieces: TemplateChild<DrawingArea>
     }
 
     #[glib::object_subclass]
@@ -109,7 +115,8 @@ mod imp {
         fn set_property(&self, _obj: &Self::Type, _id: usize, value: &Value, pspec: &ParamSpec) {
             match pspec.name() {
                 "details" => {
-                    let details = value.get::<TorrentDetailsObject>().expect("Expect torrent details");
+                    let details = value.get_owned::<TorrentDetailsObject>().expect("foo");
+                    //let details = value.get::<TorrentDetailsObject>().expect("Expect torrent details");
                     details
                         .property_expression("name")
                         .bind(&self.name.get(), "label", gtk::Widget::NONE); // TODO: what to do on unbind?
@@ -205,6 +212,44 @@ mod imp {
                             format_download_speed(i.try_into().unwrap())
                         }))
                         .bind(&self.rate_down.get(), "label", gtk::Widget::NONE);
+                    let pieces = self.pieces.get();
+                    pieces.set_content_height(25);
+                    pieces.set_width_request(1200);
+                    //pieces.set_content_width(1200);
+                    pieces.set_hexpand(true);
+                    //pieces.set_content_width(1200);
+                     
+                    details
+                        .property_expression("pieces")
+                        .watch(gtk::Widget::NONE, clone!(@weak details, @weak pieces => move || {
+                            let n = details.property_value("piece-count").get::<u64>().expect("fjkds");
+                            let s = details.property_value("pieces").get::<String>().expect("fklaksd");
+                            let percent_done = details.property_value("percent-complete").get::<f64>().expect("zckjf");
+                            let bytes = base64::decode(&s).expect("wrong bitfield?");
+                            let mut bv = BitVec::from_bytes(&bytes);
+                            bv.truncate(n as usize);
+                    pieces.set_draw_func(move |_, ctx, width, height| {
+                        if n > 0 {
+                      let piece_width = width as f64 / n as f64;
+                      //////println!("piece width: {}, count: {}, ", piece_width, n);
+                      ctx.set_source_rgb(1.0, 1.0, 1.0); 
+                      ctx.paint().expect("no paint for you");
+                      ctx.set_source_rgb (0.082, 0.325, 0.62);
+                      ctx.rectangle(0.0, 0.0, percent_done * width as f64, 6.0);
+                      ctx.fill().expect("no fill for you");
+                      ctx.set_source_rgb (0.11, 0.11, 0.11);
+                      ctx.rectangle(0.0, 6.0,  width as f64, 6.0);
+                      ctx.fill().expect("no fill for you");
+                      ctx.set_source_rgb (0.082, 0.325, 0.62);
+                      for (i, x) in bv.iter().enumerate() {
+                          if x {
+                              ctx.rectangle(i as f64 * piece_width, 12.0, piece_width + 0.5, height as f64 - 12.0);
+                              ctx.fill().expect("no fill for you");
+                          }
+                      }
+                        }
+                    });
+                        }));
 
                     self.details.replace(details);
                 }

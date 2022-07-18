@@ -3,12 +3,15 @@ use crate::utils::build_tree;
 use gtk::glib;
 use lazy_static::lazy_static;
 use std::fs;
+use std::rc::Rc;
+use std::sync::{Mutex, Arc};
 use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use crate::notification_utils::notify;
 use crate::config::Config;
+use procfs::process::Process;
 
 #[derive(Debug)]
 pub enum TorrentUpdate {
@@ -17,9 +20,11 @@ pub enum TorrentUpdate {
     Stats(SessionStats),
     FreeSpace(FreeSpace),
     Details(TorrentDetails),
+    ClientStats { mem: f64 }
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum TorrentCmd {
     Tick(u64),
     OpenDlDir(i64),
@@ -92,7 +97,7 @@ impl CommandProcessor {
     //    self.sender.blocking_send(TorrentCmd::PoisonPill()).expect("can't stop..");
     //}
     //
-    pub fn run(&mut self, config: &Config, ping: bool, notify_on_add: bool) {
+    pub fn run(&mut self, config: Arc<Mutex<Config>>, ping: bool, notify_on_add: bool) {
         let sender = self.sender.clone();
 
         let update_sender = self.update_sender.clone();
@@ -116,9 +121,8 @@ impl CommandProcessor {
             });
         }
 
-        let transmission_url = config.connection_string.to_string();
-        let remote_base_dir = config.remote_base_dir.to_string();
-        let local_base_dir = config.local_base_dir.to_string();
+        let transmission_url = config.lock().expect("foo").connection_string.to_string();
+        let remote_base_dir = config.lock().expect("foo").remote_base_dir.to_string();
         std::thread::spawn(move || {
             let rt = Runtime::new().expect("can't create runtime");
             rt.block_on(async move {
@@ -128,12 +132,14 @@ impl CommandProcessor {
                     let ts = response.get("arguments").unwrap().get("torrents").unwrap().to_owned();
                     update_sender.send(TorrentUpdate::Full(ts)).expect("blah");
                 }
+                let mut details_id: Option<i64> = None;
                 loop {
                     // should move into async
                     let cmd = receiver.recv().await.expect("probably ticker thread panicked");
 
                     match cmd {
                         TorrentCmd::GetDetails(id) => {
+                            details_id = Some(id);
                             let details = client.get_torrent_details(vec![id]).await.expect("oops3"); // TODO: what if id is wrong?
                             if details.arguments.torrents.len() > 0 {
                                 let res = update_sender
@@ -154,6 +160,16 @@ impl CommandProcessor {
                                 .send(TorrentUpdate::Partial(torrents, removed, i))
                                 .expect("blah");
                             //}
+                            if let Some(id) = details_id {
+                            let details = client.get_torrent_details(vec![id]).await.expect("oops3"); // TODO: what if id is wrong?
+                            if details.arguments.torrents.len() > 0 {
+                                let res = update_sender
+                                    .send(TorrentUpdate::Details(details.arguments.torrents[0].to_owned()));
+                                if res.is_err() {
+                                    println!("{:#?}", res.err().unwrap());
+                                }
+                            }
+                            }
 
                             if i % 3 == 0 {
                                 let stats = client.get_session_stats().await.expect("boo");
@@ -168,17 +184,26 @@ impl CommandProcessor {
                                     .send(TorrentUpdate::FreeSpace(free_space.arguments))
                                     .expect("foo");
                             }
+                            let me = Process::myself().unwrap();
+                            // let me_stat = me.stat().unwrap();
+                            let me_mem  = me.statm().unwrap();
+                            let page_size = procfs::page_size().unwrap() as u64;
+                            update_sender
+                                .send(TorrentUpdate::ClientStats { mem: (page_size * (me_mem.resident - me_mem.shared)) as f64 })
+                                .expect("foo");
+
                         }
                         TorrentCmd::OpenDlDir(id) => {
                             let details = client.get_torrent_details(vec![id]).await.expect("oops3"); // TODO: what if id is wrong?
                             if details.arguments.torrents.len() > 0 {
+                                let cfg = config.lock().expect("boo");
                                 let location = details.arguments.torrents[0].download_dir.clone();
                                 let my_loc = location
-                                    .replace(&remote_base_dir, &local_base_dir);
+                                    .replace(&cfg.remote_base_dir, &cfg.local_base_dir);
                                 let me_loc2 = my_loc.clone();
                                 let tree = build_tree(&details.arguments.torrents[0].files);
                                 let p = my_loc + "/" + &tree[0].path;
-                                if tree.len() == 1 && fs::read_dir(&p).is_ok() {
+                            /*    if tree.len() == 1 && fs::read_dir(&p).is_ok() {
                                     std::process::Command::new("nautilus")
                                         .arg(p)
                                         .spawn()
@@ -188,32 +213,38 @@ impl CommandProcessor {
                                         .arg(me_loc2)
                                         .spawn()
                                         .expect("failed to spawn");
+                                }*/
+                                let l = if tree.len() == 1 && fs::read_dir(&p).is_ok() { p } else { me_loc2 };
+                                let mut cmd_builder = std::process::Command::new(cfg.file_manager.cmd.clone());
+                                for a in &cfg.file_manager.args {
+                                        let arg = a.replace("{location}", &l);               
+                                        cmd_builder.arg(&arg);
                                 }
+                                cmd_builder
+                                  .spawn()
+                                  .expect("failed to spawn");
                             }
                         }
                         TorrentCmd::OpenDlTerm(id) => {
                             // TODO: refactor both into single function
                             let details = client.get_torrent_details(vec![id]).await.expect("oops3"); // TODO: what if id is wrong?
                             if details.arguments.torrents.len() > 0 {
+                                let cfg = config.lock().expect("boo");
                                 let location = details.arguments.torrents[0].download_dir.clone();
                                 let my_loc = location
-                                    .replace(&remote_base_dir, &local_base_dir);
+                                    .replace(&cfg.remote_base_dir, &cfg.local_base_dir);
                                 let me_loc2 = my_loc.clone();
                                 let tree = build_tree(&details.arguments.torrents[0].files);
                                 let p = my_loc + "/" + &tree[0].path;
-                                if tree.len() == 1 && fs::read_dir(&p).is_ok() {
-                                    std::process::Command::new("alacritty")
-                                        .arg("--working-directory")
-                                        .arg(&p)
-                                        .spawn()
-                                        .expect("failed to spawn");
-                                } else {
-                                    std::process::Command::new("alacritty")
-                                        .arg("--working-directory")
-                                        .arg(&me_loc2)
-                                        .spawn()
-                                        .expect("failed to spawn");
+                                let l = if tree.len() == 1 && fs::read_dir(&p).is_ok() { p } else { me_loc2 };
+                                let mut cmd_builder = std::process::Command::new(cfg.terminal.cmd.clone());
+                                for a in &cfg.terminal.args {
+                                        let arg = a.replace("{location}", &l);               
+                                        cmd_builder.arg(&arg);
                                 }
+                                cmd_builder
+                                  .spawn()
+                                  .expect("failed to spawn");
                             }
                         }
                         TorrentCmd::QueueMoveUp(ids) => {
